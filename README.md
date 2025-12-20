@@ -8,15 +8,6 @@ A helpful assistant for all of the gamedev mad scientists out there. Packages sp
 - Go 1.25+
 - [cocogitto](https://github.com/cocogitto/cocogitto) for commit linting (`brew install cocogitto`)
 
-### Setup
-
-
-### Build
-
-```bash
-go build -o your-app-name ./cmd/your-app-name
-```
-
 ### Commit conventions
 
 This project uses [Conventional Commits](https://www.conventionalcommits.org/). The git hooks will validate your commit messages.

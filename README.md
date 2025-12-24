@@ -1,5 +1,15 @@
 # igor
+
 A helpful assistant for all of the gamedev mad scientists out there. Packages sprites, generates animations, and does general pipeline work. Godot only (for now).
+
+## Setting up a project
+
+1. Create a file `igor.yaml` in the root of your directory (or wherever you would like to run the igor CLI tool)
+2. Format:
+
+```
+TODO: Fill out from process established
+```
 
 ## Development
 

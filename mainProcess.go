@@ -39,7 +39,7 @@ func (m processModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m processModel) View() string {
-	return "hello, world"
+	return "hello, world. source: " + prj.Source
 }
 
 // var (

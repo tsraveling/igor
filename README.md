@@ -62,6 +62,8 @@ This will generate in your output folder:
     alice.tres # the SpriteFrames resource, which can be loaded into an AnimatedSprite2D 
 ```
 
+NOTE: In character mode, large-sprite slicing does not work. If a source image exists here that is larger than the max dimension, an error will be thrown.
+
 #### Environment
 
 `mode: env` assumes that each subfolder contains a whole piece of environment. It will:

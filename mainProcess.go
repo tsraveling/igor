@@ -5,6 +5,16 @@ import (
 	// "github.com/charmbracelet/lipgloss"
 )
 
+type phase int
+
+const (
+	preparation phase = iota
+	processing
+	writing
+)
+
+type phaseCompleteMsg struct{ finished phase }
+
 type processModel struct {
 	someValue string
 }

@@ -1,6 +1,9 @@
 package main
 
 import (
+	"fmt"
+	"strings"
+
 	tea "github.com/charmbracelet/bubbletea"
 	// "github.com/charmbracelet/lipgloss"
 )
@@ -16,11 +19,12 @@ const (
 type phaseCompleteMsg struct{ finished phase }
 
 type processModel struct {
-	someValue string
+	files []imageResult
 }
 
 func makeProcessModel() (processModel, tea.Cmd) {
-	m := processModel{someValue: "example"}
+	files := walkFiles(prj.Source)
+	m := processModel{files}
 	return m, m.Init()
 }
 
@@ -49,7 +53,13 @@ func (m processModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m processModel) View() string {
-	return "hello, world. source: " + prj.Source
+	var b strings.Builder
+	for _, r := range m.files {
+		b.WriteString(r.path + "\n")
+	}
+	output := b.String()
+	return fmt.Sprintf("%d files in %s:\n\n%s", len(m.files), prj.Source, output)
+	return "hello, world. files: " + prj.Source + "\n" + output
 }
 
 // var (

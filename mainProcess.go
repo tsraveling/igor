@@ -19,12 +19,13 @@ const (
 type phaseCompleteMsg struct{ finished phase }
 
 type processModel struct {
-	files []imageResult
+	files         []imageResult
+	filesPrepared int
 }
 
 func makeProcessModel() (processModel, tea.Cmd) {
 	files := walkFiles(prj.Source)
-	m := processModel{files}
+	m := processModel{files: files, filesPrepared: 0}
 	return m, m.Init()
 }
 
@@ -36,6 +37,9 @@ func (m processModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	//	case tea.WindowSizeMsg:
 	//		m.list.SetWidth(msg.Width)
+
+	case preparedFileMsg:
+		m.filesPrepared += msg.num
 
 	case tea.KeyMsg:
 		switch keypress := msg.String(); keypress {

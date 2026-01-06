@@ -7,9 +7,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
-type preparedFileMsg struct{}
+type preparedFileMsg struct {
+	num int
+}
 
 type imageResult struct {
 	path     string
@@ -25,6 +28,7 @@ func walkFiles(path string) []imageResult {
 			return err
 		}
 		if !d.IsDir() && strings.HasSuffix(strings.ToLower(d.Name()), ".png") {
+
 			relPath, _ := filepath.Rel(path, p)
 			f, err := os.Open(p)
 			if err != nil {
@@ -47,6 +51,9 @@ func walkFiles(path string) []imageResult {
 		}
 		return nil
 	})
+	// FIXME: Remove this fake sleeper
+	time.Sleep(200 * time.Millisecond)
+	prg.Send(preparedFileMsg{num: len(results)})
 	return results
 }
 

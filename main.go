@@ -5,6 +5,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+var prg *tea.Program
+
 func main() {
 
 	// TODO: Replace this with arg[0]
@@ -17,8 +19,8 @@ func main() {
 	var m tea.Model
 	m, _ = makeProcessModel()
 
-	p := tea.NewProgram(m)
-	p.Run()
+	prg = tea.NewProgram(m)
+	prg.Run()
 
 	fmt.Printf(igorLogo)
 }

@@ -19,18 +19,18 @@ const (
 type phaseCompleteMsg struct{ finished phase }
 
 type processModel struct {
-	files         []imageResult
-	filesPrepared int
+	files []imageResult
+	phase phase
 }
 
 func makeProcessModel() (processModel, tea.Cmd) {
-	files := walkFiles(prj.Source)
-	m := processModel{files: files, filesPrepared: 0}
+	// files := walkFiles(prj.Source)
+	m := processModel{files: []imageResult{}, phase: preparation}
 	return m, m.Init()
 }
 
 func (m processModel) Init() tea.Cmd {
-	return nil
+	return walkFilesCmd(prj.Source)
 }
 
 func (m processModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -39,7 +39,7 @@ func (m processModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	//		m.list.SetWidth(msg.Width)
 
 	case preparedFileMsg:
-		m.filesPrepared += msg.num
+		m.files = append(m.files, msg.file)
 
 	case tea.KeyMsg:
 		switch keypress := msg.String(); keypress {
@@ -57,13 +57,18 @@ func (m processModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m processModel) View() string {
-	var b strings.Builder
-	for _, r := range m.files {
-		b.WriteString(r.path + "\n")
+	switch m.phase {
+	case preparation:
+		return fmt.Sprintf("%d images", len(m.files))
+	case processing:
+		var b strings.Builder
+		for _, r := range m.files {
+			b.WriteString(r.path + "\n")
+		}
+		output := b.String()
+		return fmt.Sprintf("%d files in %s:\n\n%s", len(m.files), prj.Source, output)
 	}
-	output := b.String()
-	return fmt.Sprintf("%d files in %s:\n\n%s", len(m.files), prj.Source, output)
-	return "hello, world. files: " + prj.Source + "\n" + output
+	return "unsupported phase"
 }
 
 // var (

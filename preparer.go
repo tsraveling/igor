@@ -10,26 +10,23 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-type preparedFileMsg struct {
-	file imageResult
+type prepareCompleteMsg struct {
+	folders []folder
 }
 
-type prepareCompleteMsg struct{}
-
-type imageResult struct {
-	path     string
-	filename string
-	w, h     int
-}
-
+/** Walks through the given path and assembles an array of folders, each with a child array of imageFiles. */
 func walkFilesCmd(path string) tea.Cmd {
 	return func() tea.Msg {
+		folders := make(map[string]*folder)
+
 		filepath.WalkDir(path, func(p string, d os.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
 			if !d.IsDir() && strings.HasSuffix(strings.ToLower(d.Name()), ".png") {
 				relPath, _ := filepath.Rel(path, p)
+				dir := filepath.Dir(relPath)
+
 				f, err := os.Open(p)
 				if err != nil {
 					return nil
@@ -41,20 +38,30 @@ func walkFilesCmd(path string) tea.Cmd {
 					return nil
 				}
 
-				prg.Send(preparedFileMsg{
-					file: imageResult{
-						path:     relPath,
-						filename: d.Name(),
-						w:        img.Width,
-						h:        img.Height,
-					}})
+				// Get or create folder
+				if _, ok := folders[dir]; !ok {
+					folders[dir] = &folder{
+						name:  filepath.Base(dir),
+						path:  dir,
+						files: []imageFile{},
+					}
+				}
+
+				folders[dir].files = append(folders[dir].files, imageFile{
+					filename: d.Name(),
+					w:        img.Width,
+					h:        img.Height,
+				})
 			}
 			return nil
 		})
-		return prepareCompleteMsg{}
+
+		// Convert map to slice
+		result := make([]folder, 0, len(folders))
+		for _, f := range folders {
+			result = append(result, *f)
+		}
+
+		return prepareCompleteMsg{folders: result}
 	}
 }
-
-// STUB: Use globs to dilineate files
-// STUB: Check image sizes and route
-// STUB: Send progress messages

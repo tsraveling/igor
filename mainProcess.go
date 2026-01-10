@@ -12,6 +12,7 @@ type phase int
 
 const (
 	preparation phase = iota
+	parsing
 	processing
 	writing
 )
@@ -19,13 +20,13 @@ const (
 type phaseCompleteMsg struct{ finished phase }
 
 type processModel struct {
-	files []imageResult
-	phase phase
+	folders []folder
+	phase   phase
 }
 
 func makeProcessModel() (processModel, tea.Cmd) {
 	// files := walkFiles(prj.Source)
-	m := processModel{files: []imageResult{}, phase: preparation}
+	m := processModel{folders: []folder{}, phase: preparation}
 	return m, m.Init()
 }
 
@@ -38,10 +39,8 @@ func (m processModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// 1. Preparation
 
-	case preparedFileMsg:
-		m.files = append(m.files, msg.file)
-
 	case prepareCompleteMsg:
+		m.folders = msg.folders
 		m.phase = processing
 
 	case tea.KeyMsg:
@@ -62,14 +61,14 @@ func (m processModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m processModel) View() string {
 	switch m.phase {
 	case preparation:
-		return fmt.Sprintf("%d images", len(m.files))
+		return fmt.Sprintf("%d folders", len(m.folders))
 	case processing:
 		var b strings.Builder
-		for _, r := range m.files {
-			b.WriteString(r.path + "\n")
+		for _, r := range m.folders {
+			b.WriteString(r.path + " > " + r.name + "\n")
 		}
 		output := b.String()
-		return fmt.Sprintf("%d files in %s:\n\n%s", len(m.files), prj.Source, output)
+		return fmt.Sprintf("%d files in %s:\n\n%s", len(m.folders), prj.Source, output)
 	}
 	return "unsupported phase"
 }

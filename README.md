@@ -23,7 +23,7 @@ rules:
 
 `mode: simple` is set by default, so you'd only use it for subdirectories of a folder or project default set to something else.
 
-Simple mode will:
+Simple _test_ mode will:
 
 1. Use project settings to construct spritesheets for any images under the dimension limit
 2. Grid-slice images above the dimension limit, and construct a .tscn with the whole image. Note that kebab-case will be turned into snake_case to match Godot conventions.

@@ -35,11 +35,14 @@ func (m processModel) Init() tea.Cmd {
 
 func (m processModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	//	case tea.WindowSizeMsg:
-	//		m.list.SetWidth(msg.Width)
+
+	// 1. Preparation
 
 	case preparedFileMsg:
 		m.files = append(m.files, msg.file)
+
+	case prepareCompleteMsg:
+		m.phase = processing
 
 	case tea.KeyMsg:
 		switch keypress := msg.String(); keypress {

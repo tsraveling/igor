@@ -44,6 +44,7 @@ func walkFilesCmd(path string) tea.Cmd {
 						name:  filepath.Base(dir),
 						path:  dir,
 						files: []imageFile{},
+						typ:   determineFolderType(dir),
 					}
 				}
 

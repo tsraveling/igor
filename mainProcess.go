@@ -65,7 +65,16 @@ func (m processModel) View() string {
 	case processing:
 		var b strings.Builder
 		for _, r := range m.folders {
-			b.WriteString(r.path + " > " + r.name + "\n")
+			var t string
+			switch r.typ {
+			case FolderTypeCharacter:
+				t = "char"
+			case FolderTypeEnv:
+				t = "env"
+			case FolderTypeStandard:
+				t = "standard"
+			}
+			b.WriteString(r.path + " > " + t + ": " + r.name + "\n")
 		}
 		output := b.String()
 		return fmt.Sprintf("%d files in %s:\n\n%s", len(m.folders), prj.Source, output)

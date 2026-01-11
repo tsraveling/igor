@@ -11,3 +11,13 @@ type imageFile struct {
 	filename string
 	w, h     int
 }
+
+type workPack struct {
+	f     folder
+	files []imageFile
+}
+
+type workSlice struct {
+	f    folder
+	file imageFile
+}

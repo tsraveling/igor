@@ -1,10 +1,10 @@
 package main
 
-import tea "github.com/charmbracelet/bubbletea"
+import (
+	"fmt"
 
-type someMsg struct {
-	file imageFile
-}
+	tea "github.com/charmbracelet/bubbletea"
+)
 
 type parseCompleteMsg struct {
 	workQueue []any
@@ -18,10 +18,25 @@ func parseFilesCmd(folders []folder) tea.Cmd {
 	return func() tea.Msg {
 		q := []any{}
 
-		// STUB: Next, slice the flat image array into pieces of work:
-		// 1. folders to pack
-		// 2. large images to slice
+		for _, f := range folders {
+			toPack := []imageFile{}
+			for _, i := range f.files {
+				if i.h > prj.SliceSize || i.w > prj.SliceSize {
+					if f.typ != FolderTypeCharacter {
+						q = append(q, workSlice{f: f, file: i})
+					} else {
+						prg.Send(exception{code: errorTooLarge, msg: fmt.Sprintf("%s has dimensions %d, %d, which is larger than slice size %d -- not allowed in a character type folder!", f.name, i.w, i.h, prj.SliceSize)})
+					}
+				} else {
+					toPack = append(toPack, i)
+				}
+			}
+			if len(toPack) > 0 {
+				q = append(q, workPack{f, toPack})
+			}
+		}
 
+		prg.Send(parseCompleteMsg{workQueue: q})
 		return nil
 	}
 }

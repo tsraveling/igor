@@ -17,11 +17,26 @@ const (
 	writing
 )
 
+type exceptionCode int
+
+const (
+	unknown = iota
+	errorTooLarge
+)
+
+type exception struct {
+	code int
+	msg  string
+	file imageFile
+}
+
 type phaseCompleteMsg struct{ finished phase }
 
 type processModel struct {
-	folders []folder
-	phase   phase
+	folders    []folder
+	phase      phase
+	exceptions []exception
+	work       []any
 }
 
 func makeProcessModel() (processModel, tea.Cmd) {
@@ -41,7 +56,15 @@ func (m processModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case prepareCompleteMsg:
 		m.folders = msg.folders
+		m.phase = parsing
+		return m, parseFilesCmd(m.folders)
+
+	case parseCompleteMsg:
+		m.work = msg.workQueue
 		m.phase = processing
+
+	case exception:
+		m.exceptions = append(m.exceptions, msg)
 
 	case tea.KeyMsg:
 		switch keypress := msg.String(); keypress {
@@ -64,9 +87,9 @@ func (m processModel) View() string {
 		return fmt.Sprintf("%d folders", len(m.folders))
 	case processing:
 		var b strings.Builder
-		for _, r := range m.folders {
+		for _, f := range m.folders {
 			var t string
-			switch r.typ {
+			switch f.typ {
 			case FolderTypeCharacter:
 				t = "char"
 			case FolderTypeEnv:
@@ -74,7 +97,7 @@ func (m processModel) View() string {
 			case FolderTypeStandard:
 				t = "standard"
 			}
-			b.WriteString(r.path + " > " + t + ": " + r.name + "\n")
+			b.WriteString(f.path + " > " + t + ": " + f.name + "\n")
 		}
 		output := b.String()
 		return fmt.Sprintf("%d files in %s:\n\n%s", len(m.folders), prj.Source, output)

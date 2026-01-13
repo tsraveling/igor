@@ -23,7 +23,7 @@ func parseFilesCmd(folders []folder) tea.Cmd {
 			for _, i := range f.files {
 				if i.h > prj.SliceSize || i.w > prj.SliceSize {
 					if f.typ != FolderTypeCharacter {
-						q = append(q, workSlice{f: f, file: i})
+						q = append(q, workSlice{f: f, file: i, id: len(q)})
 					} else {
 						prg.Send(exception{code: errorTooLarge, msg: fmt.Sprintf("%s has dimensions %d, %d, which is larger than slice size %d -- not allowed in a character type folder!", f.name, i.w, i.h, prj.SliceSize)})
 					}
@@ -32,7 +32,7 @@ func parseFilesCmd(folders []folder) tea.Cmd {
 				}
 			}
 			if len(toPack) > 0 {
-				q = append(q, workPack{f, toPack})
+				q = append(q, workPack{f: f, id: len(q), files: toPack})
 			}
 		}
 

@@ -33,10 +33,13 @@ type exception struct {
 type phaseCompleteMsg struct{ finished phase }
 
 type processModel struct {
-	folders    []folder
-	phase      phase
-	exceptions []exception
-	work       []any
+	folders      []folder
+	phase        phase
+	exceptions   []exception
+	pendingWork  []any
+	activeWork   []any
+	finishedWork []any
+	failedWork   []any
 }
 
 func makeProcessModel() (processModel, tea.Cmd) {
@@ -59,12 +62,24 @@ func (m processModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.phase = parsing
 		return m, parseFilesCmd(m.folders)
 
+	// 2. Parsing
+
 	case parseCompleteMsg:
-		m.work = msg.workQueue
+		m.pendingWork = msg.workQueue
 		m.phase = processing
+		return m, processWorkCmd(m.pendingWork)
+
+	// 3. Preparation
+
+	case startWorkMsg:
+		w := msg.work
+
+	// -. Shared
 
 	case exception:
 		m.exceptions = append(m.exceptions, msg)
+
+	// user input
 
 	case tea.KeyMsg:
 		switch keypress := msg.String(); keypress {
@@ -85,7 +100,7 @@ func (m processModel) View() string {
 	switch m.phase {
 	case preparation:
 		return fmt.Sprintf("%d folders", len(m.folders))
-	case processing:
+	case parsing:
 		var b strings.Builder
 		for _, f := range m.folders {
 			var t string

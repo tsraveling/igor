@@ -12,12 +12,26 @@ type imageFile struct {
 	w, h     int
 }
 
+type workPiece interface {
+	ID() int
+}
+
 type workPack struct {
+	id    int
 	f     folder
 	files []imageFile
 }
 
+func (w workPack) ID() int {
+	return w.id
+}
+
 type workSlice struct {
+	id   int
 	f    folder
 	file imageFile
+}
+
+func (w workSlice) ID() int {
+	return w.id
 }

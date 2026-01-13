@@ -15,6 +15,7 @@ const (
 	parsing
 	processing
 	writing
+	done
 )
 
 type exceptionCode int
@@ -36,10 +37,10 @@ type processModel struct {
 	folders      []folder
 	phase        phase
 	exceptions   []exception
-	pendingWork  []any
-	activeWork   []any
-	finishedWork []any
-	failedWork   []any
+	pendingWork  []workPiece
+	activeWork   []workPiece
+	finishedWork []workPiece
+	failedWork   []workPiece
 }
 
 func makeProcessModel() (processModel, tea.Cmd) {
@@ -50,6 +51,17 @@ func makeProcessModel() (processModel, tea.Cmd) {
 
 func (m processModel) Init() tea.Cmd {
 	return walkFilesCmd(prj.Source)
+}
+
+/** Moves the item of id from the first array into the second */
+func move(id int, from *[]workPiece, into *[]workPiece) {
+	for i, w := range *from {
+		if w.ID() == id {
+			*from = append((*from)[:i], (*from)[i+1:]...)
+			*into = append(*into, w)
+			return
+		}
+	}
 }
 
 func (m processModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -72,7 +84,13 @@ func (m processModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// 3. Preparation
 
 	case startWorkMsg:
-		w := msg.work
+		move(msg.id, &m.pendingWork, &m.activeWork)
+
+	case finishWorkMsg:
+		move(msg.id, &m.activeWork, &m.finishedWork)
+
+	case processingCompleteMsg:
+		m.phase = done
 
 	// -. Shared
 
@@ -116,6 +134,29 @@ func (m processModel) View() string {
 		}
 		output := b.String()
 		return fmt.Sprintf("%d files in %s:\n\n%s", len(m.folders), prj.Source, output)
+	case processing:
+		var summaryLine = fmt.Sprintf("%d pending | %d active | %d finished", len(m.pendingWork), len(m.activeWork), len(m.finishedWork))
+		var b strings.Builder
+		for _, w := range m.activeWork {
+			switch v := w.(type) {
+			case workPack:
+				b.WriteString(v.f.name + " > packing\n")
+			case workSlice:
+				b.WriteString(v.file.filename + " > slice\n")
+			}
+		}
+		return fmt.Sprintf("%s\n\n%s", summaryLine, b.String())
+	case done:
+		var b strings.Builder
+		for _, w := range m.finishedWork {
+			switch v := w.(type) {
+			case workPack:
+				b.WriteString(v.f.name + " > packed!\n")
+			case workSlice:
+				b.WriteString(v.file.filename + " > sliced!\n")
+			}
+		}
+		return fmt.Sprintf("FINISHED!\n\n%s", b.String())
 	}
 	return "unsupported phase"
 }

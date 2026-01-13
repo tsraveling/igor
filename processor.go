@@ -8,19 +8,19 @@ import (
 
 type startWorkMsg struct {
 	id   int
-	work any
+	work workPiece
 }
 
 type finishWorkMsg struct {
 	id   int
-	work any
+	work workPiece
 }
 
-type workCompleteMsg struct{}
+type processingCompleteMsg struct{}
 
 const maxWorkers = 8
 
-func processWorkCmd(work []any) tea.Cmd {
+func processWorkCmd(work []workPiece) tea.Cmd {
 	return func() tea.Msg {
 
 		sem := make(chan struct{}, maxWorkers)
@@ -51,6 +51,6 @@ func processWorkCmd(work []any) tea.Cmd {
 		}
 
 		wg.Wait()
-		return workCompleteMsg{}
+		return processingCompleteMsg{}
 	}
 }

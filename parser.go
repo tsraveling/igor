@@ -7,7 +7,7 @@ import (
 )
 
 type parseCompleteMsg struct {
-	workQueue []any
+	workQueue []workPiece
 }
 
 /*
@@ -16,7 +16,9 @@ be chunked and paralellized
 */
 func parseFilesCmd(folders []folder) tea.Cmd {
 	return func() tea.Msg {
-		q := []any{}
+		q := []workPiece{}
+
+		// STUB: We have to do the trimming here, or somewhere, and then only slice the images that are still too big after that!
 
 		for _, f := range folders {
 			toPack := []imageFile{}

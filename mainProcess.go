@@ -11,11 +11,12 @@ import (
 type phase int
 
 const (
-	preparation phase = iota
-	parsing
-	processing
-	writing
-	done
+	preparation phase = iota // walk the files
+	trimming                 // get the trim rect for every image (run via parallel workers)
+	parsing                  // split images up by size into either packing or slicing queues
+	processing               // do the actual work of packing and slicing
+	writing                  // write the godot .tscn files
+	done                     // fin!
 )
 
 type exceptionCode int

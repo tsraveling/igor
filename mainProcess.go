@@ -22,12 +22,12 @@ const (
 type exceptionCode int
 
 const (
-	unknown = iota
+	unknown exceptionCode = iota
 	errorTooLarge
 )
 
 type exception struct {
-	code int
+	code exceptionCode
 	msg  string
 	file imageFile
 }
@@ -72,17 +72,19 @@ func (m processModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case prepareCompleteMsg:
 		m.folders = msg.folders
-		m.phase = parsing
+		m.phase = trimming
 		return m, parseFilesCmd(m.folders)
 
-	// 2. Parsing
+	// 2. Trimming
+
+	// 3. Parsing
 
 	case parseCompleteMsg:
 		m.pendingWork = msg.workQueue
 		m.phase = processing
 		return m, processWorkCmd(m.pendingWork)
 
-	// 3. Preparation
+	// 4. Preparation
 
 	case startWorkMsg:
 		move(msg.id, &m.pendingWork, &m.activeWork)

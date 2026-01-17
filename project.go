@@ -8,6 +8,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// TODO: Move this into project config
+const maxWorkers = 8
+
 type project struct {
 	Destination     string                `yaml:"destination"`
 	Source          string                `yaml:"source"`

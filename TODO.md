@@ -1,5 +1,5 @@
 # Igor TODO
 
-- [ ] Get glob working
-- [ ] Get simple mode working
+- [x] Get glob working
+
 

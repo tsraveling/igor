@@ -32,12 +32,18 @@ type exception struct {
 	file imageFile
 }
 
-type phaseCompleteMsg struct{ finished phase }
-
 type processModel struct {
-	folders      []folder
-	phase        phase
-	exceptions   []exception
+	folders        []folder
+	phase          phase
+	exceptions     []exception
+	numImagesTotal int
+
+	// Trimming
+	activeTrimming []string
+	numTrimPending int
+	numTrimDone    int
+
+	// Processing
 	pendingWork  []workPiece
 	activeWork   []workPiece
 	finishedWork []workPiece
@@ -65,6 +71,15 @@ func move(id int, from *[]workPiece, into *[]workPiece) {
 	}
 }
 
+func removeString(slice []string, s string) []string {
+	for i, v := range slice {
+		if v == s {
+			return append(slice[:i], slice[i+1:]...)
+		}
+	}
+	return slice
+}
+
 func (m processModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 
@@ -72,10 +87,25 @@ func (m processModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case prepareCompleteMsg:
 		m.folders = msg.folders
+		m.numImagesTotal = msg.total
+		m.numTrimPending = msg.total
 		m.phase = trimming
-		return m, parseFilesCmd(m.folders)
+		return m, trimImagesCmd(m.folders)
 
 	// 2. Trimming
+
+	case startedTrimmingMsg:
+		m.numTrimPending--
+		m.activeTrimming = append(m.activeTrimming, msg.img)
+
+	case finishedTrimmingMsg:
+		m.numTrimDone++
+		m.activeTrimming = removeString(m.activeTrimming, msg.img)
+
+	case trimmingCompleteMsg:
+		m.phase = parsing
+		m.folders = msg.folders
+		return m, parseFilesCmd(m.folders)
 
 	// 3. Parsing
 
@@ -136,7 +166,14 @@ func (m processModel) View() string {
 			b.WriteString(f.path + " > " + t + ": " + f.name + "\n")
 		}
 		output := b.String()
-		return fmt.Sprintf("%d files in %s:\n\n%s", len(m.folders), prj.Source, output)
+		return fmt.Sprintf("PARSING\n\n%d files in %s:\n\n%s", len(m.folders), prj.Source, output)
+	case trimming:
+		var b strings.Builder
+		for _, i := range m.activeTrimming {
+			b.WriteString(" - " + i + "\n")
+		}
+		output := b.String()
+		return fmt.Sprintf("TRIMMING\n\n%d remaining --- %d done\n\n%s", m.numTrimPending, m.numTrimDone, output)
 	case processing:
 		var summaryLine = fmt.Sprintf("%d pending | %d active | %d finished", len(m.pendingWork), len(m.activeWork), len(m.finishedWork))
 		var b strings.Builder
@@ -148,7 +185,7 @@ func (m processModel) View() string {
 				b.WriteString(v.file.filename + " > slice\n")
 			}
 		}
-		return fmt.Sprintf("%s\n\n%s", summaryLine, b.String())
+		return fmt.Sprintf("PROCESSING\n\n%s\n\n%s", summaryLine, b.String())
 	case done:
 		var b strings.Builder
 		for _, w := range m.finishedWork {

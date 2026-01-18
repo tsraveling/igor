@@ -18,8 +18,6 @@ type finishWorkMsg struct {
 
 type processingCompleteMsg struct{}
 
-const maxWorkers = 8
-
 func processWorkCmd(work []workPiece) tea.Cmd {
 	return func() tea.Msg {
 

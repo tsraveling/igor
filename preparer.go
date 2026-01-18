@@ -12,12 +12,14 @@ import (
 
 type prepareCompleteMsg struct {
 	folders []folder
+	total   int
 }
 
 /** Walks through the given path and assembles an array of folders, each with a child array of imageFiles. */
 func walkFilesCmd(path string) tea.Cmd {
 	return func() tea.Msg {
 		folders := make(map[string]*folder)
+		totalImg := 0
 
 		filepath.WalkDir(path, func(p string, d os.DirEntry, err error) error {
 			if err != nil {
@@ -48,6 +50,7 @@ func walkFilesCmd(path string) tea.Cmd {
 					}
 				}
 
+				totalImg++
 				folders[dir].files = append(folders[dir].files, imageFile{
 					filename: d.Name(),
 					w:        img.Width,
@@ -63,6 +66,6 @@ func walkFilesCmd(path string) tea.Cmd {
 			result = append(result, *f)
 		}
 
-		return prepareCompleteMsg{folders: result}
+		return prepareCompleteMsg{folders: result, total: totalImg}
 	}
 }

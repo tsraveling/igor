@@ -52,6 +52,7 @@ func walkFilesCmd(path string) tea.Cmd {
 
 				totalImg++
 				folders[dir].files = append(folders[dir].files, imageFile{
+					path:     dir,
 					filename: d.Name(),
 					w:        img.Width,
 					h:        img.Height,

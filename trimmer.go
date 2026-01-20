@@ -48,3 +48,12 @@ func trimImagesCmd(folders []folder) tea.Cmd {
 		return trimmingCompleteMsg{folders}
 	}
 }
+
+func getTrimRect(f imageFile) (*rect, error) {
+	img, err := f.load()
+	if err != nil {
+		return nil, err
+	}
+	// Do something with img
+	return nil, nil
+}

@@ -35,3 +35,9 @@ type workSlice struct {
 func (w workSlice) ID() int {
 	return w.id
 }
+
+type rect struct {
+	x, y   int
+	w, h   int
+	ow, oh int
+}

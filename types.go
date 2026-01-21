@@ -1,15 +1,12 @@
 package main
 
+import "fmt"
+
 type folder struct {
 	name  string
 	path  string
 	files []imageFile
 	typ   folderType
-}
-
-type imageFile struct {
-	filename string
-	w, h     int
 }
 
 type workPiece interface {
@@ -39,5 +36,13 @@ func (w workSlice) ID() int {
 type rect struct {
 	x, y   int
 	w, h   int
-	ow, oh int
+	mR, mB int
+}
+
+func (r *rect) isEmpty() bool {
+	return r.w == 0 && r.h == 0
+}
+
+func (r *rect) toStr() string {
+	return fmt.Sprintf("%d, %d - sz: %d, %d - mrg: %d, %d", r.x, r.y, r.w, r.h, r.mR, r.mB)
 }

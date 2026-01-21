@@ -10,6 +10,7 @@ type imageFile struct {
 	filename string
 	path     string
 	w, h     int
+	trimRect rect
 }
 
 func (imf *imageFile) load() (image.Image, error) {

@@ -1,8 +1,9 @@
 package main
 
 import (
+	"fmt"
+	"image"
 	"sync"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -15,6 +16,7 @@ type startedTrimmingMsg struct {
 type finishedTrimmingMsg struct {
 	id  int
 	img string
+	err error
 }
 
 type trimmingCompleteMsg struct{ folders []folder }
@@ -26,20 +28,32 @@ func trimImagesCmd(folders []folder) tea.Cmd {
 
 		sem := make(chan struct{}, maxWorkers)
 		var wg sync.WaitGroup
+		var mu sync.Mutex
 
 		index := 0
-		for _, f := range folders {
-			for _, i := range f.files {
+		for fi, f := range folders {
+			for ii, img := range f.files {
 				wg.Add(1)
 				sem <- struct{}{} // This uses zero memory
-				go func(id int, img imageFile) {
+				go func(id int, folderIdx int, imageIdx int, img imageFile) {
 					defer wg.Done()
 					defer func() { <-sem }()
+
 					prg.Send(startedTrimmingMsg{id, f.path + img.filename})
-					// STUB: Do actual trimming here!
-					time.Sleep(500 * time.Millisecond)
-					prg.Send(finishedTrimmingMsg{id, f.path + img.filename})
-				}(index, i)
+
+					trimRect, err := getTrimRect(img)
+					if err != nil {
+						// Handle error however you want
+						prg.Send(finishedTrimmingMsg{id: id, img: img.path + img.filename, err: err})
+						return
+					}
+
+					mu.Lock()
+					folders[folderIdx].files[imageIdx].trimRect = *trimRect
+					mu.Unlock()
+
+					prg.Send(finishedTrimmingMsg{id: id, img: f.path + img.filename})
+				}(index, fi, ii, img)
 				index++
 			}
 		}
@@ -54,6 +68,73 @@ func getTrimRect(f imageFile) (*rect, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Do something with img
-	return nil, nil
+	nrgba, ok := img.(*image.NRGBA)
+	if !ok {
+		return nil, fmt.Errorf("%s: expected NRGBA, got %T", f.path, img)
+	}
+
+	// 1. Start with the top
+	minY := -1
+	for y := 0; y < f.h && minY < 0; y++ {
+		row := nrgba.Pix[y*nrgba.Stride : y*nrgba.Stride+f.w*4]
+		for x := 0; x < f.w; x++ {
+			// Each pixel is 4 bytes, the last one is transparency so grab that.
+			// If any pixel is more than zero there's something here, this is the top
+			// of the image.
+			if row[x*4+3] > 0 {
+				minY = y
+				break
+			}
+		}
+	}
+
+	// If the entire image is transparent, return an empty rect
+	if minY < 0 {
+		return nil, fmt.Errorf("%s: Image completely empty", f.path)
+	}
+
+	// 2. Find bottom edge (scan backwards)
+	maxY := f.h - 1
+outer:
+	for y := f.h - 1; y > minY; y-- {
+		row := nrgba.Pix[y*nrgba.Stride : y*nrgba.Stride+f.w*4]
+		for x := 0; x < f.w; x++ {
+			if row[x*4+3] > 0 {
+				maxY = y
+				break outer
+			}
+		}
+	}
+
+	// 3. Now we know the top and bottom limits. Scan in on those rows.
+	minX, maxX := f.w, 0
+	for y := minY; y <= maxY; y++ {
+		row := nrgba.Pix[y*nrgba.Stride : y*nrgba.Stride+f.w*4]
+
+		// Move minX left every time we find a closer pixel
+		for x := 0; x < minX; x++ {
+			if row[x*4+3] > 0 {
+				minX = x
+				break
+			}
+		}
+
+		// Move minX right every time we find a closer pixel
+		for x := f.w - 1; x > maxX; x-- {
+			if row[x*4+3] > 0 {
+				maxX = x
+				break
+			}
+		}
+	}
+
+	// 4. Compose and return the trimmed rect
+	return &rect{
+		x:  minX,
+		y:  minY,
+		w:  (maxX - minX) + 1,
+		h:  (maxY - minY) + 1,
+		mR: f.w - maxX,
+		mB: f.h - maxY,
+	}, nil
 }

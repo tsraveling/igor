@@ -4,6 +4,7 @@ import (
 	"image"
 	"image/png"
 	"os"
+	"path/filepath"
 )
 
 type imageFile struct {
@@ -14,7 +15,8 @@ type imageFile struct {
 }
 
 func (imf *imageFile) load() (image.Image, error) {
-	f, err := os.Open(imf.path)
+	path := filepath.Join(prj.Source, imf.path, imf.filename)
+	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}

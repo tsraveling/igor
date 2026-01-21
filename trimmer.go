@@ -25,6 +25,7 @@ func trimImagesCmd(folders []folder) tea.Cmd {
 	return func() tea.Msg {
 
 		// STUB: Flat out all of the images here or otherwise iterate through these
+		prg.Send(logMsg{"it begins"})
 
 		sem := make(chan struct{}, maxWorkers)
 		var wg sync.WaitGroup
@@ -38,15 +39,19 @@ func trimImagesCmd(folders []folder) tea.Cmd {
 				go func(id int, folderIdx int, imageIdx int, img imageFile) {
 					defer wg.Done()
 					defer func() { <-sem }()
+					prg.Send(logMsg{"starting " + img.filename})
 
 					prg.Send(startedTrimmingMsg{id, f.path + img.filename})
 
 					trimRect, err := getTrimRect(img)
 					if err != nil {
 						// Handle error however you want
+						prg.Send(logMsg{"ERR: " + err.Error()})
 						prg.Send(finishedTrimmingMsg{id: id, img: img.path + img.filename, err: err})
 						return
 					}
+
+					prg.Send(logMsg{trimRect.toStr()})
 
 					mu.Lock()
 					folders[folderIdx].files[imageIdx].trimRect = *trimRect

@@ -32,11 +32,16 @@ type exception struct {
 	file imageFile
 }
 
+type logMsg struct {
+	msg string
+}
+
 type processModel struct {
 	folders        []folder
 	phase          phase
 	exceptions     []exception
 	numImagesTotal int
+	logs           []string
 
 	// Trimming
 	activeTrimming []string
@@ -130,6 +135,9 @@ func (m processModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case exception:
 		m.exceptions = append(m.exceptions, msg)
 
+	case logMsg:
+		m.logs = append(m.logs, msg.msg)
+
 	// user input
 
 	case tea.KeyMsg:
@@ -169,8 +177,14 @@ func (m processModel) View() string {
 		return fmt.Sprintf("PARSING\n\n%d files in %s:\n\n%s", len(m.folders), prj.Source, output)
 	case trimming:
 		var b strings.Builder
+		for _, l := range m.logs {
+			b.WriteString(l + "\n")
+		}
+		for _, exc := range m.exceptions {
+			b.WriteString("ERR: " + exc.msg + "\n")
+		}
 		for _, i := range m.activeTrimming {
-			b.WriteString(" - " + i + "\n")
+			b.WriteString(" & " + i + "\n")
 		}
 		output := b.String()
 		return fmt.Sprintf("TRIMMING\n\n%d remaining --- %d done\n\n%s", m.numTrimPending, m.numTrimDone, output)
@@ -196,6 +210,12 @@ func (m processModel) View() string {
 		// 		b.WriteString(v.file.filename + " > sliced!\n")
 		// 	}
 		// }
+		for _, l := range m.logs {
+			b.WriteString(l + "\n")
+		}
+		for _, exc := range m.exceptions {
+			b.WriteString("ERR: " + exc.msg + "\n")
+		}
 		for _, f := range m.folders {
 			b.WriteString(f.name + "\n")
 			for _, i := range f.files {

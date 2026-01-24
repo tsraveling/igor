@@ -23,7 +23,7 @@ func parseFilesCmd(folders []folder) tea.Cmd {
 		for _, f := range folders {
 			toPack := []imageFile{}
 			for _, i := range f.files {
-				if i.h > prj.SliceSize || i.w > prj.SliceSize {
+				if i.trimRect.w > prj.SliceSize || i.trimRect.h > prj.SliceSize {
 					if f.typ != FolderTypeCharacter {
 						q = append(q, workSlice{f: f, file: i, id: len(q)})
 					} else {

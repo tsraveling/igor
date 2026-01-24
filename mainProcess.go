@@ -202,24 +202,12 @@ func (m processModel) View() string {
 		return fmt.Sprintf("PROCESSING\n\n%s\n\n%s", summaryLine, b.String())
 	case done:
 		var b strings.Builder
-		// for _, w := range m.finishedWork {
-		// 	switch v := w.(type) {
-		// 	case workPack:
-		// 		b.WriteString(v.f.name + " > packed!\n")
-		// 	case workSlice:
-		// 		b.WriteString(v.file.filename + " > sliced!\n")
-		// 	}
-		// }
-		for _, l := range m.logs {
-			b.WriteString(l + "\n")
-		}
-		for _, exc := range m.exceptions {
-			b.WriteString("ERR: " + exc.msg + "\n")
-		}
-		for _, f := range m.folders {
-			b.WriteString(f.name + "\n")
-			for _, i := range f.files {
-				b.WriteString(" - " + i.filename + ": " + i.trimRect.toStr() + "\n")
+		for _, w := range m.finishedWork {
+			switch v := w.(type) {
+			case workPack:
+				b.WriteString(v.f.name + " > packed!\n")
+			case workSlice:
+				b.WriteString(v.file.filename + " > sliced!\n")
 			}
 		}
 		return fmt.Sprintf("FINISHED!\n\n%s", b.String())

@@ -1,12 +1,13 @@
 # Igor TODO
 
-- [ ] Trimmer:
-    - [ ] Add trim rect to data: xy, wh. (combined with original size, can get offsets etc from this)
-    - [ ] Add get trim rect algo
+- [x] Trimmer:
+    - [x] Add trim rect to data: xy, wh. (combined with original size, can get offsets etc from this)
+    - [x] Add get trim rect algo
 
 - [ ] Parser:
     - [ ] For characters, throw exceptions if above the size limit
-    - [ ] For buildings, split into two work streams based on trim rect size
+    - [ ] For buildings, split
+    - [x] Split infrastructure parsing on size limit
 
 - [ ] Packer:
     - [ ] Implement MaxRects algo

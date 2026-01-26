@@ -5,8 +5,8 @@
     - [x] Add get trim rect algo
 
 - [ ] Parser:
-    - [ ] For characters, throw exceptions if above the size limit
-    - [ ] For buildings, split
+    - [x] For characters, throw exceptions if above the size limit
+    - [x] For buildings, split
     - [x] Split infrastructure parsing on size limit
 
 - [ ] Packer:

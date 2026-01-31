@@ -36,10 +36,17 @@ func (w workSlice) ID() int {
 type spriteRect struct {
 	x, y int
 	w, h int
+	i    int
+}
+
+type freeRect struct {
+	x, y int
+	w, h int
 }
 
 type spriteBin struct {
-	rects []spriteRect
+	rects     []spriteRect
+	freeRects []freeRect
 }
 
 type rect struct {

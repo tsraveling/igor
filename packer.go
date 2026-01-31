@@ -21,10 +21,21 @@ const (
 	AlgoBLSF
 )
 
+type packWorkUpdateMsg struct {
+	id    int
+	phase packPhase
+	bins  []spriteBin
+}
+
 func pack(w workPack) {
 
+	// First, calc the bins using maxrect.
+	// TODO: Use the other algos for different types of source art
 	time.Sleep(300 * time.Millisecond)
 	bins := maxRects(w.files, AlgoBSSF)
+	prg.Send(packWorkUpdateMsg{id: w.id, phase: printing, bins: bins})
+	time.Sleep(300 * time.Millisecond)
+
 	// STUB: Print
 }
 
@@ -42,12 +53,12 @@ func pack(w workPack) {
 // allows better packing than guillotine cuts at the cost of more rects to track.
 func maxRects(files []imageFile, algo MaxRectsAlgo) []spriteBin {
 	// Start with one bin containing a single free rect spanning the full sheet
-	firstBin := spriteBin{freeRects: []freeRect{{w: prj.SpritesheetSize, h: prj.SpritesheetSize}}}
+	firstBin := spriteBin{freeRects: []rect{{w: prj.SpritesheetSize, h: prj.SpritesheetSize}}}
 	bins := []spriteBin{firstBin}
 
 	for i, img := range files {
-		spriteW := img.trimRect.w
-		spriteH := img.trimRect.h
+		spriteW := img.trim.w
+		spriteH := img.trim.h
 		placed := false
 
 		// Try each existing bin until we find one that fits.
@@ -79,10 +90,12 @@ func maxRects(files []imageFile, algo MaxRectsAlgo) []spriteBin {
 
 				// Place sprite at the bottom-left corner of the chosen free rect
 				sprite := spriteRect{
-					x: fr.x,
-					y: fr.y,
-					w: spriteW,
-					h: spriteH,
+					rect: rect{
+						x: fr.x,
+						y: fr.y,
+						w: spriteW,
+						h: spriteH,
+					},
 					i: i,
 				}
 				bins[bi].rects = append(bins[bi].rects, sprite)
@@ -98,13 +111,15 @@ func maxRects(files []imageFile, algo MaxRectsAlgo) []spriteBin {
 		// No existing bin could fit this sprite - create a new bin
 		if !placed {
 			newBin := spriteBin{
-				freeRects: []freeRect{{w: prj.SpritesheetSize, h: prj.SpritesheetSize}},
+				freeRects: []rect{{w: prj.SpritesheetSize, h: prj.SpritesheetSize}},
 			}
 			sprite := spriteRect{
-				x: 0,
-				y: 0,
-				w: spriteW,
-				h: spriteH,
+				rect: rect{
+					x: 0,
+					y: 0,
+					w: spriteW,
+					h: spriteH,
+				},
 				i: i,
 			}
 			newBin.rects = append(newBin.rects, sprite)
@@ -117,7 +132,7 @@ func maxRects(files []imageFile, algo MaxRectsAlgo) []spriteBin {
 
 // scoreRect returns a score for placing a sprite in a free rect.
 // Lower scores are better. The heuristic determines what "better" means.
-func scoreRect(fr freeRect, spriteW, spriteH int, algo MaxRectsAlgo) int {
+func scoreRect(fr rect, spriteW, spriteH int, algo MaxRectsAlgo) int {
 	leftoverW := fr.w - spriteW
 	leftoverH := fr.h - spriteH
 
@@ -137,12 +152,12 @@ func scoreRect(fr freeRect, spriteW, spriteH int, algo MaxRectsAlgo) int {
 // 1. Finding all free rects that intersect with the placed sprite
 // 2. Splitting intersecting rects into up to 4 new rects (one per side)
 // 3. Removing rects that are fully contained within other rects
-func splitFreeRects(freeRects []freeRect, placed spriteRect) []freeRect {
-	var newFreeRects []freeRect
+func splitFreeRects(freeRects []rect, placed spriteRect) []rect {
+	var newFreeRects []rect
 
 	for _, fr := range freeRects {
 		// If no intersect, we're good:
-		if !rectsIntersect(fr, placed) {
+		if !fr.intersects(placed.rect) {
 			newFreeRects = append(newFreeRects, fr)
 			continue
 		}
@@ -153,7 +168,7 @@ func splitFreeRects(freeRects []freeRect, placed spriteRect) []freeRect {
 
 		// Left rect: from free rect's left edge to sprite's left edge
 		if placed.x > fr.x {
-			newFreeRects = append(newFreeRects, freeRect{
+			newFreeRects = append(newFreeRects, rect{
 				x: fr.x,
 				y: fr.y,
 				w: placed.x - fr.x,
@@ -163,7 +178,7 @@ func splitFreeRects(freeRects []freeRect, placed spriteRect) []freeRect {
 
 		// Right rect: from sprite's right edge to free rect's right edge
 		if placed.x+placed.w < fr.x+fr.w {
-			newFreeRects = append(newFreeRects, freeRect{
+			newFreeRects = append(newFreeRects, rect{
 				x: placed.x + placed.w,
 				y: fr.y,
 				w: (fr.x + fr.w) - (placed.x + placed.w),
@@ -173,7 +188,7 @@ func splitFreeRects(freeRects []freeRect, placed spriteRect) []freeRect {
 
 		// Bottom rect: from free rect's bottom edge to sprite's bottom edge
 		if placed.y > fr.y {
-			newFreeRects = append(newFreeRects, freeRect{
+			newFreeRects = append(newFreeRects, rect{
 				x: fr.x,
 				y: fr.y,
 				w: fr.w,
@@ -183,7 +198,7 @@ func splitFreeRects(freeRects []freeRect, placed spriteRect) []freeRect {
 
 		// Top rect: from sprite's top edge to free rect's top edge
 		if placed.y+placed.h < fr.y+fr.h {
-			newFreeRects = append(newFreeRects, freeRect{
+			newFreeRects = append(newFreeRects, rect{
 				x: fr.x,
 				y: placed.y + placed.h,
 				w: fr.w,
@@ -193,11 +208,11 @@ func splitFreeRects(freeRects []freeRect, placed spriteRect) []freeRect {
 	}
 
 	// Finally, remove any rect fully contained by any other rect:
-	var ret []freeRect
+	var ret []rect
 	for i, a := range newFreeRects {
 		contained := false
 		for j, b := range newFreeRects {
-			if i != j && rectContains(b, a) {
+			if i != j && b.contains(a) {
 				contained = true
 				break
 			}
@@ -207,20 +222,4 @@ func splitFreeRects(freeRects []freeRect, placed spriteRect) []freeRect {
 		}
 	}
 	return ret
-}
-
-// rectsIntersect returns true if a free rect and placed sprite overlap
-func rectsIntersect(fr freeRect, sr spriteRect) bool {
-	return fr.x < sr.x+sr.w &&
-		fr.x+fr.w > sr.x &&
-		fr.y < sr.y+sr.h &&
-		fr.y+fr.h > sr.y
-}
-
-// rectContains returns true if rect 'outer' fully contains rect 'inner'
-func rectContains(outer, inner freeRect) bool {
-	return outer.x <= inner.x &&
-		outer.y <= inner.y &&
-		outer.x+outer.w >= inner.x+inner.w &&
-		outer.y+outer.h >= inner.y+inner.h
 }

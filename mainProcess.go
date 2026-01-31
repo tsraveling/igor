@@ -124,6 +124,16 @@ func (m processModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case startWorkMsg:
 		move(msg.id, &m.pendingWork, &m.activeWork)
 
+	case packWorkUpdateMsg:
+		for i := range m.activeWork {
+			if m.activeWork[i].ID() == msg.id {
+				wp := m.activeWork[i].(workPack)
+				wp.phase = msg.phase
+				wp.bins = msg.bins
+				m.activeWork[i] = wp
+			}
+		}
+
 	case finishWorkMsg:
 		move(msg.id, &m.activeWork, &m.finishedWork)
 
@@ -194,7 +204,13 @@ func (m processModel) View() string {
 		for _, w := range m.activeWork {
 			switch v := w.(type) {
 			case workPack:
-				b.WriteString(v.f.name + " > packing\n")
+				switch v.phase {
+				case calculating:
+					b.WriteString(v.f.name + " > packing (calculating)\n")
+				case printing:
+					packString := fmt.Sprintf(" > packing (printing %d bins)\n", len(v.bins))
+					b.WriteString(v.f.name + packString)
+				}
 			case workSlice:
 				b.WriteString(v.file.filename + " > slice\n")
 			}
@@ -205,7 +221,8 @@ func (m processModel) View() string {
 		for _, w := range m.finishedWork {
 			switch v := w.(type) {
 			case workPack:
-				b.WriteString(v.f.name + " > packed!\n")
+				packString := fmt.Sprintf(" > packed %d bins!\n", len(v.bins))
+				b.WriteString(v.f.name + packString)
 			case workSlice:
 				b.WriteString(v.file.filename + " > sliced!\n")
 			}

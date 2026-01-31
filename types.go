@@ -1,6 +1,8 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+)
 
 type folder struct {
 	name  string
@@ -13,10 +15,19 @@ type workPiece interface {
 	ID() int
 }
 
+type packPhase int
+
+const (
+	calculating packPhase = iota
+	printing
+)
+
 type workPack struct {
 	id    int
 	f     folder
 	files []imageFile
+	bins  []spriteBin
+	phase packPhase
 }
 
 func (w workPack) ID() int {
@@ -34,31 +45,20 @@ func (w workSlice) ID() int {
 }
 
 type spriteRect struct {
-	x, y int
-	w, h int
-	i    int
-}
-
-type freeRect struct {
-	x, y int
-	w, h int
+	rect
+	i int
 }
 
 type spriteBin struct {
 	rects     []spriteRect
-	freeRects []freeRect
+	freeRects []rect
 }
 
-type rect struct {
-	x, y   int
-	w, h   int
+type trimRect struct {
+	rect
 	mR, mB int
 }
 
-func (r *rect) isEmpty() bool {
-	return r.w == 0 && r.h == 0
-}
-
-func (r *rect) toStr() string {
+func (r *trimRect) toStr() string {
 	return fmt.Sprintf("%d, %d - sz: %d, %d - mrg: %d, %d", r.x, r.y, r.w, r.h, r.mR, r.mB)
 }

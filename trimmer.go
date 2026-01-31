@@ -43,7 +43,7 @@ func trimImagesCmd(folders []folder) tea.Cmd {
 
 					prg.Send(startedTrimmingMsg{id, f.path + img.filename})
 
-					trimRect, err := getTrimRect(img)
+					tR, err := getTrimRect(img)
 					if err != nil {
 						// Handle error however you want
 						prg.Send(logMsg{"ERR: " + err.Error()})
@@ -51,10 +51,10 @@ func trimImagesCmd(folders []folder) tea.Cmd {
 						return
 					}
 
-					prg.Send(logMsg{trimRect.toStr()})
+					prg.Send(logMsg{tR.toStr()})
 
 					mu.Lock()
-					folders[folderIdx].files[imageIdx].trimRect = *trimRect
+					folders[folderIdx].files[imageIdx].trim = *tR
 					mu.Unlock()
 
 					prg.Send(finishedTrimmingMsg{id: id, img: f.path + img.filename})
@@ -68,7 +68,7 @@ func trimImagesCmd(folders []folder) tea.Cmd {
 	}
 }
 
-func getTrimRect(f imageFile) (*rect, error) {
+func getTrimRect(f imageFile) (*trimRect, error) {
 	img, err := f.load()
 	if err != nil {
 		return nil, err
@@ -134,11 +134,13 @@ outer:
 	}
 
 	// 4. Compose and return the trimmed rect
-	return &rect{
-		x:  minX,
-		y:  minY,
-		w:  (maxX - minX) + 1,
-		h:  (maxY - minY) + 1,
+	return &trimRect{
+		rect: rect{
+			x: minX,
+			y: minY,
+			w: (maxX - minX) + 1,
+			h: (maxY - minY) + 1,
+		},
 		mR: f.w - maxX,
 		mB: f.h - maxY,
 	}, nil

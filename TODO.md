@@ -4,17 +4,21 @@
     - [x] Add trim rect to data: xy, wh. (combined with original size, can get offsets etc from this)
     - [x] Add get trim rect algo
 
-- [ ] Parser:
+- [x] Parser:
     - [x] For characters, throw exceptions if above the size limit
     - [x] For buildings, split
     - [x] Split infrastructure parsing on size limit
 
-- [ ] Packer:
-    - [ ] Implement MaxRects algo
-    - [ ] Figure out how to write to PNG, get a package if needed
-    - [ ] Store new quad data in model struct for encoding later
-    - [ ] Generate spritesheet PNGs successfully by folder
-    - [ ] Ensure spritesheet overflow is handled
+- [x] Packer:
+    - [x] Implement MaxRects algo
+    - [x] Figure out how to write to PNG, get a package if needed
+    - [x] Store new quad data in model struct for encoding later
+    - [x] Generate spritesheet PNGs successfully by folder
+    - [x] Ensure spritesheet overflow is handled
+
+- [ ] Improvements:
+    - [ ] Use a smaller sheet size if we don't need the whole thing (maybe with a margin option addable to config)
+    - [ ] Error handling
 
 - [ ] Slicer:
     - [ ] Write slicing algo

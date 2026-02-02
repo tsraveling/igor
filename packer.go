@@ -2,7 +2,6 @@ package main
 
 import (
 	"math"
-	"time"
 )
 
 type MaxRectsAlgo int
@@ -31,12 +30,9 @@ func pack(w workPack) {
 
 	// First, calc the bins using maxrect.
 	// TODO: Use the other algos for different types of source art
-	time.Sleep(300 * time.Millisecond)
 	bins := maxRects(w.files, AlgoBSSF)
 	prg.Send(packWorkUpdateMsg{id: w.id, phase: printing, bins: bins})
-	time.Sleep(300 * time.Millisecond)
-
-	// STUB: Print
+	renderBins(bins, w.files)
 }
 
 // maxRects implements the MaxRects bin packing algorithm.

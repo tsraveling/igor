@@ -14,6 +14,10 @@ type imageFile struct {
 	trim     trimRect
 }
 
+func (imf *imageFile) targetFolderPath() string {
+	return filepath.Join(prj.Destination, imf.path)
+}
+
 func (imf *imageFile) load() (image.Image, error) {
 	path := filepath.Join(prj.Source, imf.path, imf.filename)
 	f, err := os.Open(path)

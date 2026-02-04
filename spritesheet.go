@@ -14,12 +14,36 @@ func imgRectFor(r rect) image.Rectangle {
 }
 
 func renderBins(bins []spriteBin, imgs []imageFile) []error {
-	sheet := image.NewRGBA(image.Rect(0, 0, prj.SpritesheetSize, prj.SpritesheetSize))
+
 	errors := []error{}
 	if len(imgs) == 0 {
 		return append(errors, fmt.Errorf("Sprite list was empty, aborting write."))
 	}
 	for bi, bin := range bins {
+		// 1. First calculate spritesheet size
+		maxX, maxY := 0, 0
+		for _, p := range bin.rects {
+			rx := p.rect.x + p.rect.w
+			ry := p.rect.y + p.rect.h
+			if rx > maxX {
+				maxX = rx
+			}
+			if ry > maxY {
+				maxY = ry
+			}
+		}
+
+		sheetW, sheetH := prj.SpritesheetSize, prj.SpritesheetSize
+		for sheetW/2 > maxX {
+			sheetW = sheetW / 2
+		}
+		for sheetH/2 > maxY {
+			sheetH = sheetH / 2
+		}
+
+		sheet := image.NewRGBA(image.Rect(0, 0, sheetW, sheetH))
+
+		// 2. Then render
 		trgFolder := ""
 		for _, p := range bin.rects {
 			img := imgs[p.i]

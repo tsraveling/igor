@@ -32,7 +32,10 @@ func pack(w workPack) {
 	// TODO: Use the other algos for different types of source art
 	bins := maxRects(w.files, AlgoBSSF)
 	prg.Send(packWorkUpdateMsg{id: w.id, phase: printing, bins: bins})
-	renderBins(bins, w.files)
+	errs := renderBins(bins, w.files)
+	for _, err := range errs {
+		prg.Send(toException(err, nil))
+	}
 }
 
 // maxRects implements the MaxRects bin packing algorithm.

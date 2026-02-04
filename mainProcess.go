@@ -24,12 +24,17 @@ type exceptionCode int
 const (
 	unknown exceptionCode = iota
 	errorTooLarge
+	systemError
 )
 
 type exception struct {
 	code exceptionCode
 	msg  string
-	file imageFile
+	file *imageFile
+}
+
+func toException(err error, imf *imageFile) exception {
+	return exception{code: systemError, msg: err.Error(), file: imf}
 }
 
 type logMsg struct {

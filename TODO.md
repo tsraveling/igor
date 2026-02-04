@@ -17,8 +17,8 @@
     - [x] Ensure spritesheet overflow is handled
 
 - [ ] Improvements:
-    - [ ] Use a smaller sheet size if we don't need the whole thing (maybe with a margin option addable to config)
-    - [ ] Error handling
+    - [x] Use a smaller sheet size if we don't need the whole thing (maybe with a margin option addable to config)
+    - [x] Error handling
 
 - [ ] Slicer:
     - [ ] Write slicing algo

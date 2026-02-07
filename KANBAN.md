@@ -1,5 +1,6 @@
 ## BACKLOG
 
+- Option to slice all trimmed images above the slice rect size (vs above the spritesheet size as it is now)
 
 ## FIXES
 

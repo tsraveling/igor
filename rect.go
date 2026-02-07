@@ -9,6 +9,14 @@ func (r *rect) isEmpty() bool {
 	return r.w == 0 && r.h == 0
 }
 
+func (r *rect) r() int {
+	return r.x + r.w
+}
+
+func (r *rect) b() int {
+	return r.y + r.h
+}
+
 // returns true if a free rect and placed sprite overlap
 func (fr *rect) intersects(sr rect) bool {
 	return fr.x < sr.x+sr.w &&

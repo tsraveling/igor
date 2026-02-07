@@ -34,10 +34,16 @@ func (w workPack) ID() int {
 	return w.id
 }
 
+type imgSlice struct {
+	rect
+	path string
+}
+
 type workSlice struct {
-	id   int
-	f    folder
-	file imageFile
+	id     int
+	f      folder
+	file   imageFile
+	slices []imgSlice // Will be encoded relative to the trimmed rect
 }
 
 func (w workSlice) ID() int {

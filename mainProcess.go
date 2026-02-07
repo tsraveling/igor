@@ -139,6 +139,15 @@ func (m processModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+	case sliceWorkUpdateMsg:
+		for i := range m.activeWork {
+			if m.activeWork[i].ID() == msg.id {
+				wp := m.activeWork[i].(workSlice)
+				wp.slices = append(wp.slices, msg.slice)
+				m.activeWork[i] = wp
+			}
+		}
+
 	case finishWorkMsg:
 		move(msg.id, &m.activeWork, &m.finishedWork)
 
@@ -217,7 +226,8 @@ func (m processModel) View() string {
 					b.WriteString(v.f.name + packString)
 				}
 			case workSlice:
-				b.WriteString(v.file.filename + " > slice\n")
+				sliceString := fmt.Sprintf(" > slicing %d pieces\n", len(v.slices))
+				b.WriteString(v.file.filename + sliceString)
 			}
 		}
 		return fmt.Sprintf("PROCESSING\n\n%s\n\n%s", summaryLine, b.String())
@@ -229,7 +239,8 @@ func (m processModel) View() string {
 				packString := fmt.Sprintf(" > packed %d bins!\n", len(v.bins))
 				b.WriteString(v.f.name + packString)
 			case workSlice:
-				b.WriteString(v.file.filename + " > sliced!\n")
+				sliceString := fmt.Sprintf("%s > cut %d slices!\n", v.file.filename, len(v.slices))
+				b.WriteString(sliceString)
 			}
 		}
 		return fmt.Sprintf("FINISHED!\n\n%s", b.String())

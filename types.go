@@ -35,8 +35,8 @@ func (w workPack) ID() int {
 }
 
 type imgSlice struct {
-	rect
-	path string
+	rect        // The original slice of the image
+	path string // The path where the slice image lives
 }
 
 type workSlice struct {

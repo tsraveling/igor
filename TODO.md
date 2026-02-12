@@ -21,7 +21,8 @@
     - [x] Error handling
 
 - [ ] Slicer:
-    - [ ] Write slicing algo
+    - [x] Write slicing algo
+    - [ ] Render image slices to files
     - [ ] Encode sliced coord data for reassembly later
     - [ ] Ensure writing out to trimmed PNG chunks successfully
 

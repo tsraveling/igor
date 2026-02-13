@@ -83,13 +83,14 @@ func buildTres(pngResPath string, sr spriteRect, img imageFile) string {
 	b.WriteString("atlas = ExtResource(\"1\")\n")
 	b.WriteString(fmt.Sprintf("region = Rect2(%d, %d, %d, %d)\n", sr.x, sr.y, sr.w, sr.h))
 
-	// Only include margin if there's actual padding
+	// Only include margin if there's actual padding.
+	// Godot's margin is Rect2(left_offset, top_offset, total_width_expansion, total_height_expansion)
 	mL := img.trim.x
 	mT := img.trim.y
-	mR := img.trim.mR
-	mB := img.trim.mB
-	if mL != 0 || mT != 0 || mR != 0 || mB != 0 {
-		b.WriteString(fmt.Sprintf("margin = Rect2(%d, %d, %d, %d)\n", mL, mT, mR, mB))
+	mW := img.w - img.trim.w // total horizontal pixels trimmed
+	mH := img.h - img.trim.h // total vertical pixels trimmed
+	if mL != 0 || mT != 0 || mW != 0 || mH != 0 {
+		b.WriteString(fmt.Sprintf("margin = Rect2(%d, %d, %d, %d)\n", mL, mT, mW, mH))
 	}
 
 	return b.String()

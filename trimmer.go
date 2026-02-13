@@ -141,7 +141,7 @@ outer:
 			w: (maxX - minX) + 1,
 			h: (maxY - minY) + 1,
 		},
-		mR: f.w - maxX,
-		mB: f.h - maxY,
+		mR: f.w - maxX - 1,
+		mB: f.h - maxY - 1,
 	}, nil
 }

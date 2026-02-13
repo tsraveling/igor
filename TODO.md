@@ -1,5 +1,11 @@
 # Igor TODO
 
+- [ ] ISSUES:
+    - [ ] The trim etc rect is off right now -- animation jumps around
+    - [ ] Some tres are not being generated at all (e.g. cast)
+    - [ ] Some tres are getting cut off (e.g. jump-v2)
+    - [ ] tres injection prefix in config file
+
 - [x] Trimmer:
     - [x] Add trim rect to data: xy, wh. (combined with original size, can get offsets etc from this)
     - [x] Add get trim rect algo
@@ -20,11 +26,11 @@
     - [x] Use a smaller sheet size if we don't need the whole thing (maybe with a margin option addable to config)
     - [x] Error handling
 
-- [ ] Slicer:
+- [x] Slicer:
     - [x] Write slicing algo
-    - [ ] Render image slices to files
-    - [ ] Encode sliced coord data for reassembly later
-    - [ ] Ensure writing out to trimmed PNG chunks successfully
+    - [x] Render image slices to files
+    - [x] Encode sliced coord data for reassembly later
+    - [x] Ensure writing out to trimmed PNG chunks successfully
 
 - [ ] Writer:
     - [ ] Packed:

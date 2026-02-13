@@ -26,11 +26,11 @@ func processWorkCmd(work []workPiece) tea.Cmd {
 
 		for _, w := range work {
 			wg.Add(1)
-			sem <- struct{}{} // This uses zero memory
 
 			switch v := w.(type) {
 			case workPack:
 				go func(id int, p workPack) {
+					sem <- struct{}{}
 					defer wg.Done()
 					defer func() { <-sem }()
 					prg.Send(startWorkMsg{id: id, work: p})
@@ -39,6 +39,7 @@ func processWorkCmd(work []workPiece) tea.Cmd {
 				}(v.id, v)
 			case workSlice:
 				go func(id int, s workSlice) {
+					sem <- struct{}{}
 					defer wg.Done()
 					defer func() { <-sem }()
 					prg.Send(startWorkMsg{id: id, work: s})

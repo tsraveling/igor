@@ -16,7 +16,13 @@ type project struct {
 	Source          string                `yaml:"source"`
 	SpritesheetSize int                   `yaml:"spritesheet-size"`
 	SliceSize       int                   `yaml:"slice-size"`
+	ResPrefix       string                `yaml:"res-prefix"`
 	Rules           map[string]ruleConfig `yaml:"rules"`
+}
+
+// resPath builds a Godot resource path from a path relative to prj.Destination.
+func (p *project) resPath(relPath string) string {
+	return "res://" + p.ResPrefix + filepath.ToSlash(relPath)
 }
 
 var prj project

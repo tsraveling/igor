@@ -152,6 +152,10 @@ func (m processModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		move(msg.id, &m.activeWork, &m.finishedWork)
 
 	case processingCompleteMsg:
+		m.phase = writing
+		return m, writeResourcesCmd(m.finishedWork)
+
+	case writingCompleteMsg:
 		m.phase = done
 
 	// -. Shared
@@ -231,6 +235,8 @@ func (m processModel) View() string {
 			}
 		}
 		return fmt.Sprintf("PROCESSING\n\n%s\n\n%s", summaryLine, b.String())
+	case writing:
+		return "WRITING .tres resources..."
 	case done:
 		var b strings.Builder
 		for _, w := range m.finishedWork {

@@ -2,8 +2,10 @@ package main
 
 import (
 	"fmt"
+	"math/rand"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 
@@ -33,6 +35,20 @@ func writeResourcesCmd(work []workPiece) tea.Cmd {
 		}
 
 		wg.Wait()
+
+		// Generate SpriteFrames for character folders
+		charGroups := map[string][]workPack{}
+		for _, w := range work {
+			if wp, ok := w.(workPack); ok && wp.f.typ == FolderTypeCharacter {
+				parentPath := filepath.Dir(wp.f.path)
+				charGroups[parentPath] = append(charGroups[parentPath], wp)
+			}
+		}
+		for parentPath, packs := range charGroups {
+			charName := filepath.Base(parentPath)
+			writeSpriteFrames(charName, parentPath, packs)
+		}
+
 		return writingCompleteMsg{}
 	}
 }
@@ -71,6 +87,107 @@ func writeTres(wp workPack) {
 				prg.Send(toException(err, &img))
 			}
 		}
+	}
+}
+
+func generateRandomID(length int) string {
+	const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
+	b := make([]byte, length)
+	for i := range b {
+		b[i] = charset[rand.Intn(len(charset))]
+	}
+	return string(b)
+}
+
+func writeSpriteFrames(charName string, parentPath string, packs []workPack) {
+	// Sort packs by animation name for deterministic output
+	sort.Slice(packs, func(i, j int) bool {
+		return packs[i].f.name < packs[j].f.name
+	})
+
+	type frameRef struct {
+		resPath string
+		id      string
+		anim    string
+	}
+
+	var frames []frameRef
+	counter := 1
+
+	for _, wp := range packs {
+		// Sort files by filename for correct frame ordering
+		files := make([]imageFile, len(wp.files))
+		copy(files, wp.files)
+		sort.Slice(files, func(i, j int) bool {
+			return files[i].filename < files[j].filename
+		})
+
+		animName := wp.f.name
+
+		for _, img := range files {
+			spriteName := strings.TrimSuffix(img.filename, filepath.Ext(img.filename))
+			tresRelPath := filepath.Join(img.path, spriteName+".tres")
+			resPath := prj.resPath(tresRelPath)
+			id := fmt.Sprintf("%d_%s", counter, generateRandomID(5))
+			frames = append(frames, frameRef{resPath: resPath, id: id, anim: animName})
+			counter++
+		}
+	}
+
+	var b strings.Builder
+
+	// Header
+	b.WriteString("[gd_resource type=\"SpriteFrames\" format=3]\n\n")
+
+	// ext_resource entries
+	for _, f := range frames {
+		b.WriteString(fmt.Sprintf("[ext_resource type=\"Texture2D\" path=\"%s\" id=\"%s\"]\n", f.resPath, f.id))
+	}
+
+	b.WriteString("\n[resource]\n")
+	b.WriteString("animations = [")
+
+	// Group frames by animation, preserving order
+	animOrder := []string{}
+	animFrames := map[string][]frameRef{}
+	for _, f := range frames {
+		if _, exists := animFrames[f.anim]; !exists {
+			animOrder = append(animOrder, f.anim)
+		}
+		animFrames[f.anim] = append(animFrames[f.anim], f)
+	}
+
+	for ai, animName := range animOrder {
+		if ai > 0 {
+			b.WriteString(", ")
+		}
+		b.WriteString("{\n")
+		b.WriteString("\"frames\": [")
+
+		aFrames := animFrames[animName]
+		for fi, f := range aFrames {
+			if fi > 0 {
+				b.WriteString(", ")
+			}
+			b.WriteString("{\n")
+			b.WriteString("\"duration\": 1.0,\n")
+			b.WriteString(fmt.Sprintf("\"texture\": ExtResource(\"%s\")\n", f.id))
+			b.WriteString("}")
+		}
+
+		b.WriteString("],\n")
+		b.WriteString("\"loop\": true,\n")
+		b.WriteString(fmt.Sprintf("\"name\": &\"%s\",\n", animName))
+		b.WriteString("\"speed\": 5.0\n")
+		b.WriteString("}")
+	}
+
+	b.WriteString("]\n")
+
+	// Write the file
+	outPath := filepath.Join(prj.Destination, parentPath, charName+"_frames.tres")
+	if err := os.WriteFile(outPath, []byte(b.String()), 0644); err != nil {
+		prg.Send(toException(err, nil))
 	}
 }
 

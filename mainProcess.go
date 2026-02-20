@@ -191,6 +191,7 @@ func (m processModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case writingCompleteMsg:
 		m.phase = done
+		return m, tea.Quit
 
 	// -. Shared
 

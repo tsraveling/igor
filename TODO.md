@@ -55,3 +55,79 @@
 ## Soon
 
 - [ ] Sprite sequence assembler
+
+
+# Old Output
+
+```go
+	switch m.phase {
+	case preparation:
+		return fmt.Sprintf("%d folders", len(m.folders))
+	case parsing:
+		var b strings.Builder
+		for _, f := range m.folders {
+			var t string
+			switch f.typ {
+			case FolderTypeCharacter:
+				t = "char"
+			case FolderTypeEnv:
+				t = "env"
+			case FolderTypeStandard:
+				t = "standard"
+			}
+			b.WriteString(f.path + " > " + t + ": " + f.name + "\n")
+		}
+		output := b.String()
+		return fmt.Sprintf("PARSING\n\n%d files in %s:\n\n%s", len(m.folders), prj.Source, output)
+	case trimming:
+		var b strings.Builder
+		for _, l := range m.logs {
+			b.WriteString(l + "\n")
+		}
+		for _, exc := range m.exceptions {
+			b.WriteString("ERR: " + exc.msg + "\n")
+		}
+		for _, i := range m.activeTrimming {
+			b.WriteString(" & " + i + "\n")
+		}
+		output := b.String()
+		return fmt.Sprintf("TRIMMING\n\n%d remaining --- %d done\n\n%s", m.numTrimPending, m.numTrimDone, output)
+	case processing:
+		var summaryLine = fmt.Sprintf("%d pending | %d active | %d finished", len(m.pendingWork), len(m.activeWork), len(m.finishedWork))
+		var b strings.Builder
+		for _, w := range m.activeWork {
+			switch v := w.(type) {
+			case workPack:
+				switch v.phase {
+				case calculating:
+					b.WriteString(v.f.name + " > packing (calculating)\n")
+				case printing:
+					packString := fmt.Sprintf(" > packing (printing %d bins)\n", len(v.bins))
+					b.WriteString(v.f.name + packString)
+				}
+			case workSlice:
+				sliceString := fmt.Sprintf(" > slicing %d pieces\n", len(v.slices))
+				b.WriteString(v.file.filename + sliceString)
+			}
+		}
+		return fmt.Sprintf("PROCESSING\n\n%s\n\n%s", summaryLine, b.String())
+	case writing:
+		return "WRITING .tres resources..."
+	case done:
+		var b strings.Builder
+		for _, w := range m.finishedWork {
+			switch v := w.(type) {
+			case workPack:
+				packString := fmt.Sprintf(" > packed %d bins!\n", len(v.bins))
+				b.WriteString(v.f.name + packString)
+			case workSlice:
+				sliceString := fmt.Sprintf("%s > cut %d slices!\n", v.file.filename, len(v.slices))
+				b.WriteString(sliceString)
+			}
+		}
+		return fmt.Sprintf("FINISHED!\n\n%s", b.String())
+	}
+	return "unsupported phase"
+}
+
+```

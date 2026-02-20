@@ -3,14 +3,17 @@ package main
 import (
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
 
 type writingCompleteMsg struct{}
 
-func writeResourcesCmd(work []workPiece) tea.Cmd {
+func startWriting(work []workPiece, ch chan writeProgressMsg) tea.Cmd {
 	return func() tea.Msg {
+		total := len(work)
+		var done atomic.Int32
 		sem := make(chan struct{}, maxWorkers)
 		var wg sync.WaitGroup
 
@@ -23,6 +26,7 @@ func writeResourcesCmd(work []workPiece) tea.Cmd {
 					defer wg.Done()
 					defer func() { <-sem }()
 					writeTres(wp)
+					ch <- writeProgressMsg{done: int(done.Add(1)), total: total}
 				}(v)
 			case workSlice:
 				wg.Add(1)
@@ -31,6 +35,7 @@ func writeResourcesCmd(work []workPiece) tea.Cmd {
 					defer wg.Done()
 					defer func() { <-sem }()
 					writeSliceTscn(ws)
+					ch <- writeProgressMsg{done: int(done.Add(1)), total: total}
 				}(v)
 			}
 		}
@@ -76,6 +81,17 @@ func writeResourcesCmd(work []workPiece) tea.Cmd {
 			writeEnvTscn(folderPath, envPacks[folderPath], envSlices[folderPath])
 		}
 
-		return writingCompleteMsg{}
+		close(ch)
+		return nil // writingCompleteMsg comes from waitForWriteProgress reading a closed channel
+	}
+}
+
+func waitForWriteProgress(ch chan writeProgressMsg) tea.Cmd {
+	return func() tea.Msg {
+		msg, ok := <-ch
+		if !ok {
+			return writingCompleteMsg{}
+		}
+		return msg
 	}
 }

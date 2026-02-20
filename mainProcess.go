@@ -4,8 +4,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/progress"
 	tea "github.com/charmbracelet/bubbletea"
-	// "github.com/charmbracelet/lipgloss"
+	lipgloss "github.com/charmbracelet/lipgloss"
 )
 
 type phase int
@@ -33,6 +34,17 @@ type exception struct {
 	file *imageFile
 }
 
+func exceptionCodeName(c exceptionCode) string {
+	switch c {
+	case errorTooLarge:
+		return "TOO LARGE"
+	case systemError:
+		return "SYSTEM"
+	default:
+		return "UNKNOWN"
+	}
+}
+
 func toException(err error, imf *imageFile) exception {
 	return exception{code: systemError, msg: err.Error(), file: imf}
 }
@@ -41,12 +53,18 @@ type logMsg struct {
 	msg string
 }
 
+type writeProgressMsg struct {
+	done  int
+	total int
+}
+
 type processModel struct {
 	folders        []folder
 	phase          phase
 	exceptions     []exception
 	numImagesTotal int
 	logs           []string
+	width          int
 
 	// Trimming
 	activeTrimming []string
@@ -58,6 +76,11 @@ type processModel struct {
 	activeWork   []workPiece
 	finishedWork []workPiece
 	failedWork   []workPiece
+
+	// Writing
+	numWriteTotal int
+	numWriteDone  int
+	writeCh       chan writeProgressMsg
 }
 
 func makeProcessModel() (processModel, tea.Cmd) {
@@ -124,7 +147,7 @@ func (m processModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.phase = processing
 		return m, processWorkCmd(m.pendingWork)
 
-	// 4. Preparation
+	// 4. Processing
 
 	case startWorkMsg:
 		move(msg.id, &m.pendingWork, &m.activeWork)
@@ -151,9 +174,20 @@ func (m processModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case finishWorkMsg:
 		move(msg.id, &m.activeWork, &m.finishedWork)
 
+	// 5. Writing
+
 	case processingCompleteMsg:
 		m.phase = writing
-		return m, writeResourcesCmd(m.finishedWork)
+		m.numWriteTotal = len(m.finishedWork)
+		m.numWriteDone = 0
+		ch := make(chan writeProgressMsg)
+		m.writeCh = ch
+		return m, tea.Batch(startWriting(m.finishedWork, ch), waitForWriteProgress(ch))
+
+	case writeProgressMsg:
+		m.numWriteDone = msg.done
+		m.numWriteTotal = msg.total
+		return m, waitForWriteProgress(m.writeCh)
 
 	case writingCompleteMsg:
 		m.phase = done
@@ -166,7 +200,9 @@ func (m processModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case logMsg:
 		m.logs = append(m.logs, msg.msg)
 
-	// user input
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		return m, nil
 
 	case tea.KeyMsg:
 		switch keypress := msg.String(); keypress {
@@ -175,15 +211,41 @@ func (m processModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// Text input gets the end of it
-	// var cmd tea.Cmd
-	// m.input, cmd = m.input.Update(msg)
-	// return m, cmd
-
 	return m, nil
 }
 
-func (m processModel) View() string {
+var phaseNames = []string{"Preparation", "Trimming", "Parsing", "Processing", "Writing", "Done"}
+
+func (m processModel) getProgress() float64 {
+	switch m.phase {
+	case preparation:
+		return 0.0
+	case trimming:
+		total := m.numTrimDone + m.numTrimPending
+		if total == 0 {
+			return 0.0
+		}
+		return float64(m.numTrimDone) / float64(total)
+	case parsing:
+		return 0.0
+	case processing:
+		total := len(m.pendingWork) + len(m.activeWork) + len(m.finishedWork)
+		if total == 0 {
+			return 0.0
+		}
+		return float64(len(m.finishedWork)) / float64(total)
+	case writing:
+		if m.numWriteTotal == 0 {
+			return 0.0
+		}
+		return float64(m.numWriteDone) / float64(m.numWriteTotal)
+	case done:
+		return 1.0
+	}
+	return 0.0
+}
+
+func (m processModel) getWorkingOutput() string {
 	switch m.phase {
 	case preparation:
 		return fmt.Sprintf("%d folders", len(m.folders))
@@ -236,7 +298,7 @@ func (m processModel) View() string {
 		}
 		return fmt.Sprintf("PROCESSING\n\n%s\n\n%s", summaryLine, b.String())
 	case writing:
-		return "WRITING .tres resources..."
+		return fmt.Sprintf("WRITING\n\n%d / %d resources written", m.numWriteDone, m.numWriteTotal)
 	case done:
 		var b strings.Builder
 		for _, w := range m.finishedWork {
@@ -254,12 +316,40 @@ func (m processModel) View() string {
 	return "unsupported phase"
 }
 
-// var (
-// 	titleStyle = lipgloss.NewStyle().
-// 			Bold(true).
-// 			Foreground(lipgloss.Color("205")).
-// 			MarginLeft(2)
-//
-// 	itemStyle = lipgloss.NewStyle().
-// 			PaddingLeft(4)
-// )
+func (m processModel) View() string {
+	w := boxWidth(m.width)
+
+	// Header
+	logo := logoStyle.Render(igorLogo)
+	// STUB: turn phases -> phaseComponents. Bold and green when active.
+	phases := phaseStyle.Render(strings.Join(phaseNames, " · "))
+	// STUB: This layout actually puts phases *below* the logo. make em bottom aligned.
+	header := lipgloss.JoinHorizontal(lipgloss.Bottom, logo, "  ", phases)
+
+	// Progress
+	// STUB: Make this a bit brighter
+	bar := progress.New(progress.WithGradient(string(gradientColorLeft), string(gradientColorRight)))
+	bar.Width = w
+	prog := bar.ViewAs(m.getProgress())
+
+	// Error box (only shown if there are exceptions)
+	var errorBox string
+	if len(m.exceptions) > 0 {
+		var b strings.Builder
+		for i, exc := range m.exceptions {
+			if i > 0 {
+				b.WriteString("\n")
+			}
+			b.WriteString(fmt.Sprintf("[%s] %s", exceptionCodeName(exc.code), exc.msg))
+			if exc.file != nil {
+				b.WriteString(fmt.Sprintf("\n  %s", exc.file.path))
+			}
+		}
+		errorBox = "\n\n" + errorBoxStyle(w).Render(b.String())
+	}
+
+	// Working output box
+	outputBox := outputBoxStyle(w, m.phase == done).Render(clampLines(m.getWorkingOutput(), maxLogHeight))
+
+	return fmt.Sprintf("%s\n\n%s%s\n\n%s\n", header, prog, errorBox, outputBox)
+}

@@ -3,6 +3,4 @@ package main
 const igorLogo = `
 ▄▖▄▖▄▖▄▖
 ▐ ▌ ▌▌▙▘
-▟▖▙▌▙▌▌▌
-
-`
+▟▖▙▌▙▌▌▌`

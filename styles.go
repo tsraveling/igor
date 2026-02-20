@@ -19,16 +19,14 @@ var (
 	errorColor         = lipgloss.Color("#cc4444") // medium red
 	logColor           = lipgloss.Color("#888888") // medium gray
 
-	logoStyle  = lipgloss.NewStyle().Bold(true).Foreground(primaryColor)
-	phaseStyle = lipgloss.NewStyle().Foreground(secondaryColor)
+	logoStyle         = lipgloss.NewStyle().Bold(true).Foreground(primaryColor)
+	phaseDoneStyle    = lipgloss.NewStyle().Foreground(logColor).Strikethrough(true)
+	phaseStyle        = lipgloss.NewStyle().Foreground(primaryColor).Bold(true)
+	phasePendingStyle = lipgloss.NewStyle().Foreground(secondaryColor)
 )
 
 func boxWidth(termWidth int) int {
-	w := termWidth
-	if w > maxWidth {
-		w = maxWidth
-	}
-	return w
+	return min(termWidth, maxWidth)
 }
 
 func errorBoxStyle(w int) lipgloss.Style {

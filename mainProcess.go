@@ -320,11 +320,22 @@ func (m processModel) View() string {
 	w := boxWidth(m.width)
 
 	// Header
-	logo := logoStyle.Render(igorLogo)
-	// STUB: turn phases -> phaseComponents. Bold and green when active.
-	phases := phaseStyle.Render(strings.Join(phaseNames, " · "))
-	// STUB: This layout actually puts phases *below* the logo. make em bottom aligned.
-	header := lipgloss.JoinHorizontal(lipgloss.Bottom, logo, "  ", phases)
+	logo := logoStyle.Height(4).Render(igorLogo)
+
+	pending := false
+	phaseElements := []string{}
+	for p := preparation; p <= done; p++ {
+		if m.phase == p {
+			phaseElements = append(phaseElements, phaseStyle.Render(phaseNames[p]))
+			pending = true
+		} else if pending {
+			phaseElements = append(phaseElements, phasePendingStyle.Render(phaseNames[p]))
+		} else {
+			phaseElements = append(phaseElements, phaseDoneStyle.Render(phaseNames[p]))
+		}
+	}
+	phaseLine := lipgloss.PlaceVertical(4, lipgloss.Bottom, strings.Join(phaseElements, " . "))
+	header := lipgloss.JoinHorizontal(lipgloss.Bottom, logo, "  ", phaseLine)
 
 	// Progress
 	// STUB: Make this a bit brighter

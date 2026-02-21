@@ -1,0 +1,8 @@
+destination: ./test/out
+source: ./test/in
+spritesheet-size: 4096
+slice-size: 1024
+res-prefix: out/
+rules:
+  "chars/**": { mode: character }
+  "env/**": { mode: env }

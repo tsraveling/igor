@@ -2,6 +2,14 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## 0.1.1 - 2026-02-21
+#### Bug Fixes
+- adds arg support to main - (7a52053) - Tim Raveling
+#### Miscellaneous Chores
+- cleanup - (b0b79a2) - Tim Raveling
+
+- - -
+
 ## 0.1.0 - 2026-02-20
 #### Features
 - first working build (#2) - (d17445e) - Tim Raveling

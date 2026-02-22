@@ -57,6 +57,9 @@ func main() {
 	dir := "."
 	for _, arg := range os.Args[1:] {
 		switch arg {
+		case "-h", "--help":
+			printHelp()
+			return
 		case "--new-only":
 			sesh.NewOnly = true
 		case "--nuke":

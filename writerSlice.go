@@ -54,9 +54,11 @@ func writeSliceTscn(ws workSlice) {
 
 	if sesh.NewOnly {
 		if _, err := os.Stat(tscnPath); err == nil {
-			return // already exists, skip
+			sesh.Skipped.Add(1)
+			return
 		}
 	}
+	sesh.Written.Add(1)
 	if err := os.WriteFile(tscnPath, []byte(b.String()), 0644); err != nil {
 		prg.Send(toException(err, &ws.file))
 	}

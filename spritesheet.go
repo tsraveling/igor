@@ -88,10 +88,12 @@ func savePng(img image.Image, path string, i int, total int) error {
 
 	if sesh.NewOnly {
 		if _, err := os.Stat(fullPath); err == nil {
-			return nil // already exists, skip
+			sesh.Skipped.Add(1)
+			return nil
 		}
 	}
 
+	sesh.Written.Add(1)
 	f, err := os.Create(fullPath)
 	if err != nil {
 		return err

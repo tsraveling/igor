@@ -102,9 +102,11 @@ func writeEnvTscn(folderPath string, packs []workPack, slices []workSlice) {
 	outPath := filepath.Join(prj.Destination, folderPath, folderName+".tscn")
 	if sesh.NewOnly {
 		if _, err := os.Stat(outPath); err == nil {
-			return // already exists, skip
+			sesh.Skipped.Add(1)
+			return
 		}
 	}
+	sesh.Written.Add(1)
 	if err := os.WriteFile(outPath, []byte(b.String()), 0644); err != nil {
 		prg.Send(toException(err, nil))
 	}

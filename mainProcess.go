@@ -302,6 +302,13 @@ func (m processModel) getWorkingOutput() string {
 		return fmt.Sprintf("WRITING\n\n%d / %d resources written", m.numWriteDone, m.numWriteTotal)
 	case done:
 		var b strings.Builder
+
+		if sesh.Nuke {
+			nukeStyle := lipgloss.NewStyle().Foreground(warningColor).Bold(true)
+			b.WriteString(nukeStyle.Render("Nuked the output directory before writing!"))
+			b.WriteString("\n\n")
+		}
+
 		for _, w := range m.finishedWork {
 			switch v := w.(type) {
 			case workPack:
@@ -312,6 +319,13 @@ func (m processModel) getWorkingOutput() string {
 				b.WriteString(sliceString)
 			}
 		}
+
+		if sesh.NewOnly {
+			written := sesh.Written.Load()
+			skipped := sesh.Skipped.Load()
+			b.WriteString(fmt.Sprintf("\n%d new, %d skipped (already existed)", written, skipped))
+		}
+
 		return fmt.Sprintf("FINISHED!\n\n%s", b.String())
 	}
 	return "unsupported phase"

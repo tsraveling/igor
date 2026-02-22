@@ -17,6 +17,7 @@ var (
 	gradientColorLeft  = lipgloss.Color("#7b2d8b") // dusky purple
 	gradientColorRight = lipgloss.Color("#2d8b4e") // dark mossy green
 	errorColor         = lipgloss.Color("#cc4444") // medium red
+	warningColor       = lipgloss.Color("#ccaa22") // yellow
 	logColor           = lipgloss.Color("#888888") // medium gray
 
 	logoStyle         = lipgloss.NewStyle().Bold(true).Foreground(primaryColor)

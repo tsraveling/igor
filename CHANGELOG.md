@@ -2,6 +2,14 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## 0.2.0 - 2026-02-22
+#### Features
+- added nuke and new-only flags (#3) - (3fd9348) - Tim Raveling
+#### Bug Fixes
+- added --help flag - (810aae7) - Tim Raveling
+
+- - -
+
 ## 0.1.1 - 2026-02-21
 #### Bug Fixes
 - adds arg support to main - (7a52053) - Tim Raveling

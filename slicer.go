@@ -67,6 +67,12 @@ func slice(w workSlice) {
 }
 
 func saveSlice(img image.Image, path string) error {
+	if sesh.NewOnly {
+		if _, err := os.Stat(path); err == nil {
+			return nil // already exists, skip
+		}
+	}
+
 	f, err := os.Create(path)
 	if err != nil {
 		return err

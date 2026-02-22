@@ -52,6 +52,11 @@ func writeSliceTscn(ws workSlice) {
 		b.WriteString(fmt.Sprintf("texture = ExtResource(\"%s\")\n", id))
 	}
 
+	if sesh.NewOnly {
+		if _, err := os.Stat(tscnPath); err == nil {
+			return // already exists, skip
+		}
+	}
 	if err := os.WriteFile(tscnPath, []byte(b.String()), 0644); err != nil {
 		prg.Send(toException(err, &ws.file))
 	}

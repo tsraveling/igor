@@ -86,6 +86,12 @@ func savePng(img image.Image, path string, i int, total int) error {
 	name := filepath.Base(path) + add + ".png"
 	fullPath := filepath.Join(path, name)
 
+	if sesh.NewOnly {
+		if _, err := os.Stat(fullPath); err == nil {
+			return nil // already exists, skip
+		}
+	}
+
 	f, err := os.Create(fullPath)
 	if err != nil {
 		return err

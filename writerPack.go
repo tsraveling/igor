@@ -38,6 +38,12 @@ func writeTres(wp workPack) {
 			spriteName := strings.TrimSuffix(img.filename, filepath.Ext(img.filename))
 			tresPath := filepath.Join(trgFolder, spriteName+".tres")
 
+			if sesh.NewOnly {
+				if _, err := os.Stat(tresPath); err == nil {
+					continue // already exists, skip
+				}
+			}
+
 			content := buildTres(resPath, sr, img)
 			if err := os.WriteFile(tresPath, []byte(content), 0644); err != nil {
 				prg.Send(toException(err, &img))
@@ -142,6 +148,11 @@ func writeSpriteFrames(charName string, parentPath string, packs []workPack) {
 
 	// Write the file
 	outPath := filepath.Join(prj.Destination, parentPath, charName+"_frames.tres")
+	if sesh.NewOnly {
+		if _, err := os.Stat(outPath); err == nil {
+			return // already exists, skip
+		}
+	}
 	if err := os.WriteFile(outPath, []byte(b.String()), 0644); err != nil {
 		prg.Send(toException(err, nil))
 	}

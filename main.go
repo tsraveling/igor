@@ -53,14 +53,48 @@ func main() {
 		return
 	}
 
+	// Parse flags and positional args
 	dir := "."
-	if len(os.Args) > 1 {
-		dir = os.Args[1]
+	for _, arg := range os.Args[1:] {
+		switch arg {
+		case "--new-only":
+			sesh.NewOnly = true
+		case "--nuke":
+			sesh.Nuke = true
+		default:
+			dir = arg
+		}
 	}
+
+	// Validate: --new-only and --nuke are mutually exclusive
+	if sesh.NewOnly && sesh.Nuke {
+		fmt.Println("Error: --new-only and --nuke cannot be used together.")
+		os.Exit(1)
+	}
+
 	err := loadProject(dir)
 	if err != nil {
 		fmt.Printf("%s", err.Error())
 		return
+	}
+
+	// Handle --nuke: confirm, then remove the output folder
+	if sesh.Nuke {
+		fmt.Printf("This will delete everything in %s. Are you sure? [y/N] ", prj.Destination)
+		reader := bufio.NewReader(os.Stdin)
+		input, _ := reader.ReadString('\n')
+		input = strings.TrimSpace(strings.ToLower(input))
+
+		if input != "y" && input != "yes" {
+			fmt.Println("Cancelled.")
+			return
+		}
+
+		if err := os.RemoveAll(prj.Destination); err != nil {
+			fmt.Printf("Error nuking output folder: %s\n", err.Error())
+			return
+		}
+		fmt.Printf("Nuked %s.\n", prj.Destination)
 	}
 
 	var m tea.Model

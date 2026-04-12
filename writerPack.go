@@ -35,6 +35,7 @@ func writeTres(wp workPack) {
 
 		for _, sr := range bin.rects {
 			img := wp.files[sr.i]
+			// STUB: Implement renameLayers here
 			spriteName := strings.TrimSuffix(img.filename, filepath.Ext(img.filename))
 			tresPath := filepath.Join(trgFolder, spriteName+".tres")
 

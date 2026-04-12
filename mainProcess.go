@@ -321,9 +321,8 @@ func (m processModel) getWorkingOutput() string {
 		}
 
 		if sesh.NewOnly {
-			written := sesh.Written.Load()
-			skipped := sesh.Skipped.Load()
-			b.WriteString(fmt.Sprintf("\n%d new, %d skipped (already existed)", written, skipped))
+			skipped := sesh.FoldersSkipped.Load()
+			b.WriteString(fmt.Sprintf("\n%d folders skipped (already existed)", skipped))
 		}
 
 		return fmt.Sprintf("FINISHED!\n\n%s", b.String())

@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -19,6 +21,14 @@ func parseFilesCmd(folders []folder) tea.Cmd {
 		q := []workPiece{}
 
 		for _, f := range folders {
+			if sesh.NewOnly {
+				outputDir := filepath.Join(prj.Destination, f.path)
+				if _, err := os.Stat(outputDir); err == nil {
+					sesh.FoldersSkipped.Add(1)
+					continue
+				}
+			}
+
 			toPack := []imageFile{}
 			for _, i := range f.files {
 				if i.trim.w > prj.SliceSize || i.trim.h > prj.SliceSize {

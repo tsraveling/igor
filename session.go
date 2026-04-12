@@ -7,10 +7,9 @@ import "sync/atomic"
 var sesh session
 
 type session struct {
-	NewOnly bool // --new-only: skip overwriting existing output files
+	NewOnly bool // --new-only: skip folders that already exist in the output
 	Nuke    bool // --nuke: wipe the output folder before running
 
-	// Counters for --new-only reporting (atomic for concurrent writes)
-	Skipped atomic.Int32
-	Written atomic.Int32
+	// Counter for --new-only reporting (atomic for concurrent writes)
+	FoldersSkipped atomic.Int32
 }

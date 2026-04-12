@@ -56,6 +56,49 @@
 
 - [ ] Sprite sequence assembler
 
+## Entity/Level Zippering (Art + Game Code)
+
+The core problem: Igor owns visual/structural data (art layers, positions), while game code owns behavioral data (scripts, physics, collision, inventory logic). Both target the same .tscn files. Regenerating art can't stomp game code; updating game code can't require re-importing art.
+
+### Recommended Approach: Godot Scene Inheritance
+
+Igor outputs to a `generated/` directory that it fully owns and overwrites freely. Game code lives in a separate directory and uses Godot's scene inheritance to extend the generated base scenes.
+
+```
+generated/entities/glass_bottle.tscn   <- Igor owns, always overwritten
+entities/glass_bottle.tscn             <- Inherits from above, game-code owned
+entities/glass_bottle.gd               <- Script, physics, pickup logic, etc.
+
+generated/levels/bar.tscn              <- Igor owns (layout, entity placement)
+levels/bar.tscn                        <- Inherits, adds triggers/scripts/etc.
+```
+
+The inherited scene is a diff on top of the base. It can add nodes (Area2D, CollisionShape2D), attach scripts, and override properties (z_index, modulate) on igor-managed nodes. When Igor regenerates the base, Godot merges automatically.
+
+Level .tscn generation references the game-layer paths (e.g. `res://entities/glass_bottle.tscn`), not the raw generated paths, so placed entities carry their game code.
+
+**What Igor needs to do:**
+- Output all generated .tscn/.tres to a `generated/` subdirectory
+- Use stable node names derived from entity/layer IDs (not filenames) to prevent orphaned overrides
+- Optionally scaffold stub inherited scenes on first run (protected by `--new-only`)
+
+**Risks:**
+- Node renames in the base orphan overrides in the inherited scene. Mitigated by stable IDs in the JSON abstraction.
+- Node removal breaks children parented under the removed node. Same mitigation.
+- Child ordering: if z-sort relies on tree order rather than `z_index` property, adding/removing layers shifts indices. Use `z_index` instead.
+- Devs must know not to edit generated files directly.
+
+**Benefits:**
+- Zero merge logic in Igor -- Godot's scene system handles it natively.
+- Igor stays simple: always full-overwrite its output.
+- Clean ownership boundary: `generated/` = art, everything else = game code.
+
+### Alternative Approaches
+
+- **Parse-and-merge with markers:** Igor tags its nodes with `metadata/igor_managed = true`. On regeneration, it parses the existing .tscn, strips igor-managed nodes, splices in fresh ones, and preserves user-added nodes. Most flexible, but requires a .tscn parser and careful handling of ext_resource ID conflicts and parent-path breakage.
+
+- **Composition via subscene:** Igor generates a layers-only subscene (e.g. `tea_shop_layers.tscn`) that gets instanced inside a user-owned wrapper scene. Clean separation, no parser needed, but adds a nesting level and makes per-layer property overrides less convenient (requires Godot's instance property override syntax).
+
 
 # Old Output
 

@@ -28,7 +28,9 @@ func (p *project) resPath(relPath string) string {
 var prj project
 
 type ruleConfig struct {
-	Mode string `yaml:"mode"`
+	Mode            string `yaml:"mode"`
+	RenameLayers    bool   `yaml:"renameLayers"`
+	IncludeCharName bool   `yaml:"includeCharName"`
 }
 
 func loadProject(folder string) error {

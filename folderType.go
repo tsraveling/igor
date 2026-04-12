@@ -12,11 +12,21 @@ const (
 	FolderTypeEnv       folderType = "env"
 )
 
-func determineFolderType(path string) folderType {
+type folderConfig struct {
+	typ             folderType
+	renameLayers    bool
+	includeCharName bool
+}
+
+func getFolderConfig(path string) folderConfig {
 	for pattern, rule := range prj.Rules {
 		if matched, _ := doublestar.Match(pattern, path); matched {
-			return folderType(rule.Mode)
+			return folderConfig{
+				typ:             folderType(rule.Mode),
+				renameLayers:    rule.RenameLayers,
+				includeCharName: rule.IncludeCharName,
+			}
 		}
 	}
-	return FolderTypeStandard
+	return folderConfig{typ: FolderTypeStandard}
 }

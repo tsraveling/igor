@@ -17,6 +17,26 @@ func writeTres(wp workPack) {
 	trgFolder := wp.files[0].targetFolderPath()
 	folderName := filepath.Base(trgFolder)
 
+	// Precompute alphabetical index for renameLayers
+	var sortedIndex map[int]int
+	if wp.f.config.renameLayers {
+		type indexedFile struct {
+			origIdx  int
+			filename string
+		}
+		indexed := make([]indexedFile, len(wp.files))
+		for i, f := range wp.files {
+			indexed[i] = indexedFile{origIdx: i, filename: f.filename}
+		}
+		sort.Slice(indexed, func(a, b int) bool {
+			return indexed[a].filename < indexed[b].filename
+		})
+		sortedIndex = make(map[int]int, len(indexed))
+		for pos, f := range indexed {
+			sortedIndex[f.origIdx] = pos + 1
+		}
+	}
+
 	for bi, bin := range wp.bins {
 		// Reconstruct the spritesheet PNG filename (same logic as savePng)
 		add := ""
@@ -33,10 +53,12 @@ func writeTres(wp workPack) {
 		}
 		resPath := prj.resPath(relPath)
 
+		charName := filepath.Base(filepath.Dir(wp.f.path))
+
 		for _, sr := range bin.rects {
 			img := wp.files[sr.i]
-			spriteName := strings.TrimSuffix(img.filename, filepath.Ext(img.filename))
-			tresPath := filepath.Join(trgFolder, spriteName+".tres")
+			sName := spriteName(wp.f.config, img.filename, wp.f.name, charName, sortedIndex[sr.i])
+			tresPath := filepath.Join(trgFolder, sName+".tres")
 
 			content := buildTres(resPath, sr, img)
 			if err := os.WriteFile(tresPath, []byte(content), 0644); err != nil {
@@ -44,6 +66,18 @@ func writeTres(wp workPack) {
 			}
 		}
 	}
+}
+
+func spriteName(cfg folderConfig, filename string, folderName string, charName string, alphaIndex int) string {
+	name := strings.TrimSuffix(filename, filepath.Ext(filename))
+	if cfg.renameLayers {
+		prefix := folderName
+		if cfg.includeCharName {
+			prefix = charName + "_" + prefix
+		}
+		name = fmt.Sprintf("%s_%02d", prefix, alphaIndex)
+	}
+	return name
 }
 
 func generateRandomID(length int) string {
@@ -80,9 +114,9 @@ func writeSpriteFrames(charName string, parentPath string, packs []workPack) {
 
 		animName := wp.f.name
 
-		for _, img := range files {
-			spriteName := strings.TrimSuffix(img.filename, filepath.Ext(img.filename))
-			tresRelPath := filepath.Join(img.path, spriteName+".tres")
+		for fi, img := range files {
+			sName := spriteName(wp.f.config, img.filename, wp.f.name, charName, fi+1)
+			tresRelPath := filepath.Join(img.path, sName+".tres")
 			resPath := prj.resPath(tresRelPath)
 			id := fmt.Sprintf("%d_%s", counter, generateRandomID(5))
 			frames = append(frames, frameRef{resPath: resPath, id: id, anim: animName})

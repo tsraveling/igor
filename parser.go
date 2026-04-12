@@ -32,7 +32,7 @@ func parseFilesCmd(folders []folder) tea.Cmd {
 			toPack := []imageFile{}
 			for _, i := range f.files {
 				if i.trim.w > prj.SliceSize || i.trim.h > prj.SliceSize {
-					if f.typ != FolderTypeCharacter {
+					if f.config.typ != FolderTypeCharacter {
 						q = append(q, workSlice{f: f, file: i, id: len(q)})
 					} else {
 						prg.Send(exception{code: errorTooLarge, msg: fmt.Sprintf("%s has dimensions %d, %d, which is larger than slice size %d -- not allowed in a character type folder!", f.name, i.w, i.h, prj.SliceSize)})

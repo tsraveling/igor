@@ -43,10 +43,10 @@ func walkFilesCmd(path string) tea.Cmd {
 				// Get or create folder
 				if _, ok := folders[dir]; !ok {
 					folders[dir] = &folder{
-						name:  filepath.Base(dir),
-						path:  dir,
-						files: []imageFile{},
-						typ:   determineFolderType(dir),
+						name:   filepath.Base(dir),
+						path:   dir,
+						files:  []imageFile{},
+						config: getFolderConfig(dir),
 					}
 				}
 

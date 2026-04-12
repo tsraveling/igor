@@ -5,10 +5,10 @@ import (
 )
 
 type folder struct {
-	name  string
-	path  string
-	files []imageFile
-	typ   folderType
+	name   string
+	path   string
+	files  []imageFile
+	config folderConfig
 }
 
 type workPiece interface {

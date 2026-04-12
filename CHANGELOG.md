@@ -2,6 +2,14 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## 0.2.1 - 2026-04-12
+#### Bug Fixes
+- updates new only flag to target the folder level - (c9cfcf0) - Tim Raveling
+#### Documentation
+- KANBAN and TODO updates - (51a8b0c) - Tim Raveling
+
+- - -
+
 ## 0.2.0 - 2026-02-22
 #### Features
 - added nuke and new-only flags (#3) - (3fd9348) - Tim Raveling

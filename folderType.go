@@ -13,8 +13,9 @@ const (
 )
 
 type folderConfig struct {
-	typ          folderType
-	renameLayers bool
+	typ             folderType
+	renameLayers    bool
+	includeCharName bool
 }
 
 func determineFolderType(path string) folderType {

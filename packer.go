@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"math"
 )
 
@@ -58,6 +59,12 @@ func maxRects(files []imageFile, algo MaxRectsAlgo) []spriteBin {
 	for i, img := range files {
 		spriteW := img.trim.w
 		spriteH := img.trim.h
+
+		if spriteW > prj.SpritesheetSize || spriteH > prj.SpritesheetSize {
+			prg.Send(exception{code: errorTooLarge, msg: fmt.Sprintf("%s has trimmed dimensions %d x %d, which exceeds spritesheet size %d", img.filename, spriteW, spriteH, prj.SpritesheetSize)})
+			continue
+		}
+
 		placed := false
 
 		// Try each existing bin until we find one that fits.

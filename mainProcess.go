@@ -254,7 +254,7 @@ func (m processModel) getWorkingOutput() string {
 		var b strings.Builder
 		for _, f := range m.folders {
 			var t string
-			switch f.typ {
+			switch f.config.typ {
 			case FolderTypeCharacter:
 				t = "char"
 			case FolderTypeEnv:

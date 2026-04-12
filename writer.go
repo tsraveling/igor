@@ -45,7 +45,7 @@ func startWriting(work []workPiece, ch chan writeProgressMsg) tea.Cmd {
 		// Generate SpriteFrames for character folders
 		charGroups := map[string][]workPack{}
 		for _, w := range work {
-			if wp, ok := w.(workPack); ok && wp.f.typ == FolderTypeCharacter {
+			if wp, ok := w.(workPack); ok && wp.f.config.typ == FolderTypeCharacter {
 				parentPath := filepath.Dir(wp.f.path)
 				charGroups[parentPath] = append(charGroups[parentPath], wp)
 			}
@@ -61,11 +61,11 @@ func startWriting(work []workPiece, ch chan writeProgressMsg) tea.Cmd {
 		for _, w := range work {
 			switch v := w.(type) {
 			case workPack:
-				if v.f.typ == FolderTypeEnv {
+				if v.f.config.typ == FolderTypeEnv {
 					envPacks[v.f.path] = append(envPacks[v.f.path], v)
 				}
 			case workSlice:
-				if v.f.typ == FolderTypeEnv {
+				if v.f.config.typ == FolderTypeEnv {
 					envSlices[v.f.path] = append(envSlices[v.f.path], v)
 				}
 			}

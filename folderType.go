@@ -18,11 +18,15 @@ type folderConfig struct {
 	includeCharName bool
 }
 
-func determineFolderType(path string) folderType {
+func getFolderConfig(path string) folderConfig {
 	for pattern, rule := range prj.Rules {
 		if matched, _ := doublestar.Match(pattern, path); matched {
-			return folderType(rule.Mode)
+			return folderConfig{
+				typ:             folderType(rule.Mode),
+				renameLayers:    rule.RenameLayers,
+				includeCharName: rule.IncludeCharName,
+			}
 		}
 	}
-	return FolderTypeStandard
+	return folderConfig{typ: FolderTypeStandard}
 }

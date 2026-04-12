@@ -4,5 +4,5 @@ spritesheet-size: 4096
 slice-size: 1024
 res-prefix: out/
 rules:
-  "chars/**": { mode: character }
+  "chars/**": { mode: character, renameLayers: true, includeCharName: true }
   "env/**": { mode: env }

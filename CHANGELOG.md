@@ -2,6 +2,12 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## 0.3.1 - 2026-04-12
+#### Bug Fixes
+- handles large pre-trim sprite sizes - (93d83e8) - Tim Raveling
+
+- - -
+
 ## 0.3.0 - 2026-04-12
 #### Features
 - added layer renaming for char mode (#4) - (7b753c4) - Tim Raveling

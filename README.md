@@ -64,6 +64,20 @@ This will generate in your output folder:
 
 NOTE: In character mode, large-sprite slicing does not work. If a source image exists here that is larger than the max dimension, an error will be thrown.
 
+Character mode can also implement the **renameLayers** rule:
+
+```
+"characters/**": { mode: character, renameLayers: true }
+```
+
+If this is set, the folder name will be used as the final .tres base, rather than the source sprite PNGs. So if you have an animation layed out in frames like `A.png, B.png, C.png, D.png`, in a folder `characters/mario/jump`, they'll be named `jump_01.tres, jump_02.tres, jump_03.tres`, and so on.
+
+```
+"characters/**": { mode: character, renameLayers: true, includeCharName: true }
+```
+
+If you set `includeCharName`, then `renameLayers` will will also include the character name. For the example above, that would look like `mario_jump_01.tres`, and so on.
+
 #### Environment
 
 `mode: env` assumes that each subfolder contains a whole piece of environment. It will:

@@ -24,7 +24,6 @@ func writeEnvTscn(folderPath string, packs []workPack, slices []workSlice) {
 	// Add packed sprites (small images → .tres referencing spritesheet)
 	for _, wp := range packs {
 		for _, img := range wp.files {
-			// STUB: Implement renameLayers here
 			spriteName := strings.TrimSuffix(img.filename, filepath.Ext(img.filename))
 			tresRelPath := filepath.Join(img.path, spriteName+".tres")
 			resPath := prj.resPath(tresRelPath)

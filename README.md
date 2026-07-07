@@ -1,5 +1,7 @@
 # igor
 
+**NOTE:** This project is still in alpha stage, and is somewhat likely to change significantly between releases.
+
 A helpful assistant for all of the gamedev mad scientists out there. Packages sprites, generates animations, and does general pipeline work. Godot only (for now).
 
 ## Setting up a project

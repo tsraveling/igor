@@ -2,6 +2,15 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## 0.4.0 - 2026-09-15
+#### Features
+- adds changed-only updates - (c2eaa45) - Tim Raveling
+#### Documentation
+- readme tweak - (d809433) - Tim Raveling
+- updated README - (5435d73) - Tim Raveling
+
+- - -
+
 ## 0.3.1 - 2026-04-12
 #### Bug Fixes
 - handles large pre-trim sprite sizes - (93d83e8) - Tim Raveling

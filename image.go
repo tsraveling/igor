@@ -12,6 +12,7 @@ type imageFile struct {
 	path     string
 	w, h     int
 	trim     trimRect
+	hash     string // sha256 of file contents, for incremental builds
 }
 
 func (imf *imageFile) targetFolderPath() string {

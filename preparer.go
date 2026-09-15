@@ -1,6 +1,9 @@
 package main
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"image"
 	_ "image/png"
 	"os"
@@ -29,13 +32,14 @@ func walkFilesCmd(path string) tea.Cmd {
 				relPath, _ := filepath.Rel(path, p)
 				dir := filepath.Dir(relPath)
 
-				f, err := os.Open(p)
+				// One read serves both the content hash and the header decode.
+				data, err := os.ReadFile(p)
 				if err != nil {
 					return nil
 				}
-				defer f.Close()
+				sum := sha256.Sum256(data)
 
-				img, _, err := image.DecodeConfig(f)
+				img, _, err := image.DecodeConfig(bytes.NewReader(data))
 				if err != nil {
 					return nil
 				}
@@ -56,6 +60,7 @@ func walkFilesCmd(path string) tea.Cmd {
 					filename: d.Name(),
 					w:        img.Width,
 					h:        img.Height,
+					hash:     hex.EncodeToString(sum[:]),
 				})
 			}
 			return nil

@@ -46,6 +46,55 @@ func initProject() {
 	fmt.Println("Created igor.yml.")
 }
 
+// Prompts unless --force was passed.
+func confirm(question string) bool {
+	if sesh.Force {
+		return true
+	}
+
+	fmt.Printf("%s [y/N] ", question)
+	reader := bufio.NewReader(os.Stdin)
+	input, _ := reader.ReadString('\n')
+	input = strings.TrimSpace(strings.ToLower(input))
+	return input == "y" || input == "yes"
+}
+
+// Reports output left behind by deleted sources, and removes it under --clean.
+// Runs before the TUI starts, since it needs the prompt. Returns false if the
+// user cancelled.
+func handleStale() bool {
+	stale := findStale(loadManifest(), scanSourceFolders())
+	if len(stale) == 0 {
+		return true
+	}
+
+	if !sesh.Clean {
+		fmt.Printf("%d stale output path(s) from deleted sources. Run with --clean to remove them.\n", len(stale))
+		return true
+	}
+
+	fmt.Printf("These %d output path(s) no longer have sources:\n", len(stale))
+	for _, s := range stale {
+		fmt.Printf("  %s\n", s.path)
+	}
+	if !confirm("Delete them?") {
+		fmt.Println("Cancelled.")
+		return false
+	}
+
+	for _, s := range stale {
+		if err := os.RemoveAll(s.path); err != nil {
+			fmt.Printf("Error removing %s: %s\n", s.path, err.Error())
+			continue
+		}
+		if s.isDir {
+			sesh.Pruned = append(sesh.Pruned, s.folder)
+		}
+	}
+	fmt.Printf("Removed %d stale path(s).\n", len(stale))
+	return true
+}
+
 func main() {
 
 	if len(os.Args) > 1 && os.Args[1] == "init" {
@@ -60,18 +109,32 @@ func main() {
 		case "-h", "--help":
 			printHelp()
 			return
-		case "--new-only":
-			sesh.NewOnly = true
+		case "--all":
+			sesh.All = true
 		case "--nuke":
 			sesh.Nuke = true
+		case "--clean":
+			sesh.Clean = true
+		case "--force":
+			sesh.Force = true
+		case "--new-only":
+			fmt.Println("Error: --new-only has been removed. Incremental builds are now the default; use --all to rebuild everything.")
+			os.Exit(1)
 		default:
+			if strings.HasPrefix(arg, "-") {
+				fmt.Printf("Error: unknown flag %s. Run igor --help for usage.\n", arg)
+				os.Exit(1)
+			}
 			dir = arg
 		}
 	}
 
-	// Validate: --new-only and --nuke are mutually exclusive
-	if sesh.NewOnly && sesh.Nuke {
-		fmt.Println("Error: --new-only and --nuke cannot be used together.")
+	if sesh.Nuke && sesh.All {
+		fmt.Println("Error: --nuke already rebuilds everything, so it cannot be used with --all.")
+		os.Exit(1)
+	}
+	if sesh.Nuke && sesh.Clean {
+		fmt.Println("Error: --nuke already removes all output, so it cannot be used with --clean.")
 		os.Exit(1)
 	}
 
@@ -83,12 +146,7 @@ func main() {
 
 	// Handle --nuke: confirm, then remove the output folder
 	if sesh.Nuke {
-		fmt.Printf("This will delete everything in %s. Are you sure? [y/N] ", prj.Destination)
-		reader := bufio.NewReader(os.Stdin)
-		input, _ := reader.ReadString('\n')
-		input = strings.TrimSpace(strings.ToLower(input))
-
-		if input != "y" && input != "yes" {
+		if !confirm(fmt.Sprintf("This will delete everything in %s. Are you sure?", prj.Destination)) {
 			fmt.Println("Cancelled.")
 			return
 		}
@@ -98,6 +156,8 @@ func main() {
 			return
 		}
 		fmt.Printf("Nuked %s.\n", prj.Destination)
+	} else if !handleStale() {
+		return
 	}
 
 	var m tea.Model

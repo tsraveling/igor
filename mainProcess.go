@@ -81,6 +81,7 @@ type processModel struct {
 	numWriteTotal int
 	numWriteDone  int
 	writeCh       chan writeProgressMsg
+	manifestNote  string
 }
 
 func makeProcessModel() (processModel, tea.Cmd) {
@@ -119,9 +120,11 @@ func (m processModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// 1. Preparation
 
 	case prepareCompleteMsg:
-		m.folders = msg.folders
-		m.numImagesTotal = msg.total
-		m.numTrimPending = msg.total
+		folders, images, skipped := filterDirty(msg.folders)
+		sesh.FoldersSkipped.Store(int32(skipped))
+		m.folders = folders
+		m.numImagesTotal = images
+		m.numTrimPending = images
 		m.phase = trimming
 		return m, trimImagesCmd(m.folders)
 
@@ -191,6 +194,13 @@ func (m processModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case writingCompleteMsg:
 		m.phase = done
+		if mf, ok := buildManifest(m.folders, m.finishedWork, m.exceptions); ok {
+			if err := mf.save(); err != nil {
+				m.manifestNote = "Could not write the build cache: " + err.Error()
+			}
+		} else {
+			m.manifestNote = "Build cache not updated because of unattributable errors; the next run will rebuild everything."
+		}
 		return m, tea.Quit
 
 	// -. Shared
@@ -207,8 +217,12 @@ func (m processModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		switch keypress := msg.String(); keypress {
-		case "esc", "ctrl+c":
+		case "ctrl+c":
 			return m, tea.Quit
+		case "esc":
+			if m.phase == done {
+				return m, tea.Quit
+			}
 		}
 	}
 
@@ -320,9 +334,13 @@ func (m processModel) getWorkingOutput() string {
 			}
 		}
 
-		if sesh.NewOnly {
-			skipped := sesh.FoldersSkipped.Load()
-			b.WriteString(fmt.Sprintf("\n%d folders skipped (already existed)", skipped))
+		if skipped := sesh.FoldersSkipped.Load(); skipped > 0 {
+			b.WriteString(fmt.Sprintf("\n%d unchanged folders skipped", skipped))
+		}
+
+		if m.manifestNote != "" {
+			warnStyle := lipgloss.NewStyle().Foreground(warningColor).Bold(true)
+			b.WriteString("\n" + warnStyle.Render(m.manifestNote))
 		}
 
 		return fmt.Sprintf("FINISHED!\n\n%s", b.String())
@@ -376,5 +394,11 @@ func (m processModel) View() string {
 	// Working output box
 	outputBox := outputBoxStyle(w, m.phase == done).Render(clampLines(m.getWorkingOutput(), maxLogHeight))
 
-	return fmt.Sprintf("%s\n\n%s%s\n\n%s\n", header, prog, errorBox, outputBox)
+	hint := "working . ctrl+c to abort"
+	if m.phase == done {
+		hint = "esc or ctrl+c to quit"
+	}
+	footer := lipgloss.NewStyle().Foreground(logColor).Render(hint)
+
+	return fmt.Sprintf("%s\n\n%s%s\n\n%s\n%s\n", header, prog, errorBox, outputBox, footer)
 }

@@ -118,6 +118,10 @@ You'll get
 TODO: Fill out from process established
 ```
 
+## Incremental builds
+
+Igor tracks a content hash of every source folder in `<destination>/.igor-cache.json` and rebuilds only what changed. Commit that file so the team shares build state.
+
 ## Development
 
 ### Prerequisites

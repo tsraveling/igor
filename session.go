@@ -7,9 +7,15 @@ import "sync/atomic"
 var sesh session
 
 type session struct {
-	NewOnly bool // --new-only: skip folders that already exist in the output
-	Nuke    bool // --nuke: wipe the output folder before running
+	All   bool // --all: rebuild every folder, ignoring the manifest
+	Nuke  bool // --nuke: wipe the output folder before running
+	Clean bool // --clean: remove output left behind by deleted sources
+	Force bool // --force: answer yes to confirmation prompts
 
-	// Counter for --new-only reporting (atomic for concurrent writes)
+	// Folders removed by --clean this run, so their manifest entries can be
+	// dropped and their character siblings marked dirty.
+	Pruned []string
+
+	// Counter for reporting unchanged folders (atomic for concurrent writes)
 	FoldersSkipped atomic.Int32
 }

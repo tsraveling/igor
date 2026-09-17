@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 
@@ -42,14 +41,8 @@ func loadProject(folder string) error {
 	if err := yaml.Unmarshal(data, &prj); err != nil {
 		return err
 	}
-	fmt.Printf("%s\n", folder)
-	fmt.Printf("%s\n", prj.Source)
-	fmt.Printf("%s\n", prj.Destination)
-
 	prj.Source = filepath.Join(folder, prj.Source)
 	prj.Destination = filepath.Join(folder, prj.Destination)
-	fmt.Printf("%s\n", prj.Source)
-	fmt.Printf("%s\n", prj.Destination)
 
 	return nil
 }

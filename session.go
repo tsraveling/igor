@@ -12,6 +12,10 @@ type session struct {
 	Clean bool // --clean: remove output left behind by deleted sources
 	Force bool // --force: answer yes to confirmation prompts
 
+	CLI     bool // --cli: stream plain text to stdout instead of running the TUI
+	Quiet   bool // --quiet: summary and exceptions only
+	Verbose bool // --verbose: add per-image and per-slice detail
+
 	// Folders removed by --clean this run, so their manifest entries can be
 	// dropped and their character siblings marked dirty.
 	Pruned []string

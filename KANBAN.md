@@ -12,6 +12,9 @@
 
 ## FIXES
 
+- Igor strips Godot UIDs from generated resources on every rebuild, breaking `uid://` references and flooding git with diffs
+    * [ ] See `_spec/preserve-uid.md`
+
 
 ## NEXT
 

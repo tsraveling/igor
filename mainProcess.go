@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/progress"
@@ -50,6 +52,12 @@ func toException(err error, imf *imageFile) exception {
 }
 
 type logMsg struct {
+	msg string
+}
+
+// A non-fatal problem worth surfacing, such as an image that could not be
+// trimmed. Unlike an exception it does not fail the run.
+type warnMsg struct {
 	msg string
 }
 
@@ -125,7 +133,9 @@ func (m processModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.folders = folders
 		m.numImagesTotal = images
 		m.numTrimPending = images
+		emitPhase(preparation, "%s, %s, %d unchanged skipped", plural(len(folders), "folder"), plural(images, "image"), skipped)
 		m.phase = trimming
+		emitPhase(trimming, "%s", plural(images, "image"))
 		return m, trimImagesCmd(m.folders)
 
 	// 2. Trimming
@@ -137,16 +147,22 @@ func (m processModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case finishedTrimmingMsg:
 		m.numTrimDone++
 		m.activeTrimming = removeString(m.activeTrimming, msg.img)
+		emitDetail(trimming, "trimmed %s", msg.img)
 
 	case trimmingCompleteMsg:
+		emitPhase(trimming, "done, %d trimmed", m.numTrimDone)
 		m.phase = parsing
 		m.folders = msg.folders
+		for _, f := range m.folders {
+			emitDetail(parsing, "%s: %s", f.path, folderTypeName(f.config.typ))
+		}
 		return m, parseFilesCmd(m.folders)
 
 	// 3. Parsing
 
 	case parseCompleteMsg:
 		m.pendingWork = msg.workQueue
+		emitPhase(parsing, "%s", plural(len(msg.workQueue), "work piece"))
 		m.phase = processing
 		return m, processWorkCmd(m.pendingWork)
 
@@ -156,6 +172,7 @@ func (m processModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		move(msg.id, &m.pendingWork, &m.activeWork)
 
 	case packWorkUpdateMsg:
+		emitDetail(processing, "%s: printing %s", activeWorkName(m.activeWork, msg.id), plural(len(msg.bins), "bin"))
 		for i := range m.activeWork {
 			if m.activeWork[i].ID() == msg.id {
 				wp := m.activeWork[i].(workPack)
@@ -166,6 +183,7 @@ func (m processModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case sliceWorkUpdateMsg:
+		emitDetail(processing, "%s: cut slice %s", activeWorkName(m.activeWork, msg.id), msg.slice.path)
 		for i := range m.activeWork {
 			if m.activeWork[i].ID() == msg.id {
 				wp := m.activeWork[i].(workSlice)
@@ -176,11 +194,17 @@ func (m processModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case finishWorkMsg:
 		move(msg.id, &m.activeWork, &m.finishedWork)
+		// The moved copy carries the bins and slices accumulated by the update
+		// messages; the one on the msg does not.
+		if n := len(m.finishedWork); n > 0 {
+			emitPhase(processing, "%s", workResultLine(m.finishedWork[n-1]))
+		}
 
 	// 5. Writing
 
 	case processingCompleteMsg:
 		m.phase = writing
+		emitPhase(writing, "%s", plural(len(m.finishedWork), "resource"))
 		m.numWriteTotal = len(m.finishedWork)
 		m.numWriteDone = 0
 		ch := make(chan writeProgressMsg)
@@ -201,15 +225,24 @@ func (m processModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.manifestNote = "Build cache not updated because of unattributable errors; the next run will rebuild everything."
 		}
+		emitSummary(m.summaryLine())
+		if m.manifestNote != "" && sesh.CLI {
+			fmt.Fprintln(os.Stderr, m.manifestNote)
+		}
 		return m, tea.Quit
 
 	// -. Shared
 
 	case exception:
 		m.exceptions = append(m.exceptions, msg)
+		emitException(msg)
 
 	case logMsg:
 		m.logs = append(m.logs, msg.msg)
+
+	case warnMsg:
+		m.logs = append(m.logs, msg.msg)
+		emitWarning(msg.msg)
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -349,6 +382,10 @@ func (m processModel) getWorkingOutput() string {
 }
 
 func (m processModel) View() string {
+	if sesh.CLI {
+		return ""
+	}
+
 	w := boxWidth(m.width)
 
 	// Header
@@ -401,4 +438,62 @@ func (m processModel) View() string {
 	footer := lipgloss.NewStyle().Foreground(logColor).Render(hint)
 
 	return fmt.Sprintf("%s\n\n%s%s\n\n%s\n%s\n", header, prog, errorBox, outputBox, footer)
+}
+
+func plural(n int, noun string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, noun)
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
+}
+
+func folderTypeName(t folderType) string {
+	switch t {
+	case FolderTypeCharacter:
+		return "char"
+	case FolderTypeEnv:
+		return "env"
+	default:
+		return "standard"
+	}
+}
+
+// Names an in-flight work piece, for verbose logging.
+func activeWorkName(active []workPiece, id int) string {
+	for _, w := range active {
+		if w.ID() != id {
+			continue
+		}
+		switch v := w.(type) {
+		case workPack:
+			return v.f.path
+		case workSlice:
+			return filepath.Join(v.f.path, v.file.filename)
+		}
+	}
+	return "?"
+}
+
+func workResultLine(w workPiece) string {
+	switch v := w.(type) {
+	case workPack:
+		return fmt.Sprintf("packed %s: %s", v.f.path, plural(len(v.bins), "bin"))
+	case workSlice:
+		return fmt.Sprintf("cut %s: %s", filepath.Join(v.f.path, v.file.filename), plural(len(v.slices), "slice"))
+	}
+	return "finished work"
+}
+
+func (m processModel) summaryLine() string {
+	packed, sliced := 0, 0
+	for _, w := range m.finishedWork {
+		switch w.(type) {
+		case workPack:
+			packed++
+		case workSlice:
+			sliced++
+		}
+	}
+	return fmt.Sprintf("%d folders, %d packed, %d sliced, %d skipped, %d errors",
+		len(m.folders), packed, sliced, sesh.FoldersSkipped.Load(), len(m.exceptions))
 }

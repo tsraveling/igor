@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"image"
+	"path/filepath"
 	"sync"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -24,9 +25,6 @@ type trimmingCompleteMsg struct{ folders []folder }
 func trimImagesCmd(folders []folder) tea.Cmd {
 	return func() tea.Msg {
 
-		// STUB: Flat out all of the images here or otherwise iterate through these
-		prg.Send(logMsg{"it begins"})
-
 		sem := make(chan struct{}, maxWorkers)
 		var wg sync.WaitGroup
 		var mu sync.Mutex
@@ -39,25 +37,24 @@ func trimImagesCmd(folders []folder) tea.Cmd {
 				go func(id int, folderIdx int, imageIdx int, img imageFile) {
 					defer wg.Done()
 					defer func() { <-sem }()
-					prg.Send(logMsg{"starting " + img.filename})
-
-					prg.Send(startedTrimmingMsg{id, f.path + img.filename})
+					prg.Send(startedTrimmingMsg{id, filepath.Join(f.path, img.filename)})
 
 					tR, err := getTrimRect(img)
 					if err != nil {
-						// Handle error however you want
-						prg.Send(logMsg{"ERR: " + err.Error()})
-						prg.Send(finishedTrimmingMsg{id: id, img: img.path + img.filename, err: err})
+						prg.Send(warnMsg{"could not trim: " + err.Error()})
+						prg.Send(finishedTrimmingMsg{id: id, img: filepath.Join(img.path, img.filename), err: err})
 						return
 					}
 
-					prg.Send(logMsg{tR.toStr()})
+					if sesh.Verbose {
+						prg.Send(logMsg{img.filename + " " + tR.toStr()})
+					}
 
 					mu.Lock()
 					folders[folderIdx].files[imageIdx].trim = *tR
 					mu.Unlock()
 
-					prg.Send(finishedTrimmingMsg{id: id, img: f.path + img.filename})
+					prg.Send(finishedTrimmingMsg{id: id, img: filepath.Join(f.path, img.filename)})
 				}(index, fi, ii, img)
 				index++
 			}

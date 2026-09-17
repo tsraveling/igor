@@ -37,16 +37,21 @@ func trimImagesCmd(folders []folder) tea.Cmd {
 				go func(id int, folderIdx int, imageIdx int, img imageFile) {
 					defer wg.Done()
 					defer func() { <-sem }()
-					prg.Send(startedTrimmingMsg{id, filepath.Join(f.path, img.filename)})
+					name := filepath.Join(prj.Source, f.path, img.filename)
+					prg.Send(startedTrimmingMsg{id, name})
 
 					tR, err := getTrimRect(img)
 					if err != nil {
-						prg.Send(warnMsg{"could not trim: " + err.Error()})
-						prg.Send(finishedTrimmingMsg{id: id, img: filepath.Join(img.path, img.filename), err: err})
+						// An untrimmed image would pack at zero size and vanish
+						// from the atlas, so this fails the run.
+						prg.Send(exception{code: systemError, file: &img, msg: "could not trim: " + err.Error()})
+						prg.Send(finishedTrimmingMsg{id: id, img: name, err: err})
 						return
 					}
 
-					if sesh.Verbose {
+					// CLI mode reports trimming through finishedTrimmingMsg, and
+					// never renders logMsg, so skip the round trip there.
+					if !sesh.CLI {
 						prg.Send(logMsg{img.filename + " " + tR.toStr()})
 					}
 
@@ -54,7 +59,7 @@ func trimImagesCmd(folders []folder) tea.Cmd {
 					folders[folderIdx].files[imageIdx].trim = *tR
 					mu.Unlock()
 
-					prg.Send(finishedTrimmingMsg{id: id, img: filepath.Join(f.path, img.filename)})
+					prg.Send(finishedTrimmingMsg{id: id, img: name})
 				}(index, fi, ii, img)
 				index++
 			}
@@ -72,7 +77,7 @@ func getTrimRect(f imageFile) (*trimRect, error) {
 	}
 	nrgba, ok := img.(*image.NRGBA)
 	if !ok {
-		return nil, fmt.Errorf("%s: expected NRGBA, got %T", f.path, img)
+		return nil, fmt.Errorf("%s: expected NRGBA, got %T", filepath.Join(f.path, f.filename), img)
 	}
 
 	// 1. Start with the top
@@ -92,7 +97,7 @@ func getTrimRect(f imageFile) (*trimRect, error) {
 
 	// If the entire image is transparent, return an empty rect
 	if minY < 0 {
-		return nil, fmt.Errorf("%s: Image completely empty", f.path)
+		return nil, fmt.Errorf("%s: image is completely empty", filepath.Join(f.path, f.filename))
 	}
 
 	// 2. Find bottom edge (scan backwards)

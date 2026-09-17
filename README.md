@@ -127,12 +127,12 @@ Process output goes to stdout, one line per phase and per finished work piece. E
 ```bash
 igor --cli > build.log
 igor --cli --quiet
-igor --verbose | grep TOO
+igor --verbose 2>&1 | grep TOO
 ```
 
-`--nuke` and `--clean` delete files and normally confirm at a prompt. CLI mode cannot prompt, so they require `--force` there, and igor refuses before touching anything on disk rather than bailing halfway through a run.
+`--nuke` and `--clean` delete files and normally confirm at a prompt. CLI mode cannot prompt, so they require `--force` there, and igor refuses before touching anything on disk rather than bailing halfway through a run. A prompt that cannot be answered, such as one with stdin redirected, is an error rather than a silent no.
 
-Exit codes: `0` on a clean run, `1` if any errors occurred, `130` on interrupt.
+Exit codes: `0` on a clean run, `1` if any errors occurred, `130` on ctrl+c, `143` on SIGTERM. A build cache that cannot be written counts as an error, since the next run would otherwise silently rebuild everything.
 
 ## Incremental builds
 

@@ -70,7 +70,8 @@ func printHelp() {
 	fmt.Println(desc.Render("  Igor runs the TUI when stdout is a terminal and switches to plain text"))
 	fmt.Println(desc.Render("  output otherwise, so piping or redirecting just works. --cli and --tui"))
 	fmt.Println(desc.Render("  override the detection. Process output goes to stdout, errors to stderr."))
-	fmt.Println(desc.Render("  Igor exits 1 if any errors occurred, 130 on interrupt, 0 otherwise."))
+	fmt.Println(desc.Render("  Igor exits 1 if any errors occurred, 130 on ctrl+c, 143 on SIGTERM,"))
+	fmt.Println(desc.Render("  and 0 otherwise."))
 	fmt.Println()
 
 	fmt.Println(green.Render("CONFIG"))

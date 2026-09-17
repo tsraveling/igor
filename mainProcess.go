@@ -2,8 +2,8 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/progress"
@@ -55,12 +55,6 @@ type logMsg struct {
 	msg string
 }
 
-// A non-fatal problem worth surfacing, such as an image that could not be
-// trimmed. Unlike an exception it does not fail the run.
-type warnMsg struct {
-	msg string
-}
-
 type writeProgressMsg struct {
 	done  int
 	total int
@@ -78,6 +72,7 @@ type processModel struct {
 	activeTrimming []string
 	numTrimPending int
 	numTrimDone    int
+	numTrimFailed  int
 
 	// Processing
 	pendingWork  []workPiece
@@ -90,6 +85,7 @@ type processModel struct {
 	numWriteDone  int
 	writeCh       chan writeProgressMsg
 	manifestNote  string
+	aborted       bool
 }
 
 func makeProcessModel() (processModel, tea.Cmd) {
@@ -133,7 +129,7 @@ func (m processModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.folders = folders
 		m.numImagesTotal = images
 		m.numTrimPending = images
-		emitPhase(preparation, "%s, %s, %d unchanged skipped", plural(len(folders), "folder"), plural(images, "image"), skipped)
+		emitPhase(preparation, "%s, %s, %s skipped as unchanged", plural(len(folders), "folder"), plural(images, "image"), plural(skipped, "folder"))
 		m.phase = trimming
 		emitPhase(trimming, "%s", plural(images, "image"))
 		return m, trimImagesCmd(m.folders)
@@ -147,14 +143,28 @@ func (m processModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case finishedTrimmingMsg:
 		m.numTrimDone++
 		m.activeTrimming = removeString(m.activeTrimming, msg.img)
-		emitDetail(trimming, "trimmed %s", msg.img)
+		if msg.err != nil {
+			m.numTrimFailed++
+		} else {
+			emitDetail(trimming, "trimmed %s", msg.img)
+		}
 
 	case trimmingCompleteMsg:
+		// Dropping a failed image would renumber every later layer in its
+		// folder, so nothing gets written at all.
+		if m.numTrimFailed > 0 {
+			emitPhase(trimming, "%s failed to trim, nothing written", plural(m.numTrimFailed, "image"))
+			emitSummary(m.summaryLine())
+			m.phase = done
+			return m, tea.Quit
+		}
 		emitPhase(trimming, "done, %d trimmed", m.numTrimDone)
 		m.phase = parsing
 		m.folders = msg.folders
-		for _, f := range m.folders {
-			emitDetail(parsing, "%s: %s", f.path, folderTypeName(f.config.typ))
+		if detailOn() {
+			for _, f := range m.folders {
+				emitDetail(parsing, "%s: %s", f.path, folderTypeName(f.config.typ))
+			}
 		}
 		return m, parseFilesCmd(m.folders)
 
@@ -163,8 +173,20 @@ func (m processModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case parseCompleteMsg:
 		m.pendingWork = msg.workQueue
 		emitPhase(parsing, "%s", plural(len(msg.workQueue), "work piece"))
+
+		// Packing writes spritesheets as it goes, so an image that cannot be
+		// packed has to stop the run before any of it starts.
+		if len(m.exceptions) > 0 {
+			emitPhase(parsing, "%s, nothing written", plural(len(m.exceptions), "error"))
+			emitSummary(m.summaryLine())
+			m.phase = done
+			return m, tea.Quit
+		}
+
 		m.phase = processing
-		return m, processWorkCmd(m.pendingWork)
+		// move() compacts pendingWork in place as work starts, so the command
+		// gets its own copy rather than a slice shifting underneath its range.
+		return m, processWorkCmd(slices.Clone(m.pendingWork))
 
 	// 4. Processing
 
@@ -172,7 +194,9 @@ func (m processModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		move(msg.id, &m.pendingWork, &m.activeWork)
 
 	case packWorkUpdateMsg:
-		emitDetail(processing, "%s: printing %s", activeWorkName(m.activeWork, msg.id), plural(len(msg.bins), "bin"))
+		if detailOn() {
+			emitDetail(processing, "%s: printing %s", activeWorkName(m.activeWork, msg.id), plural(len(msg.bins), "bin"))
+		}
 		for i := range m.activeWork {
 			if m.activeWork[i].ID() == msg.id {
 				wp := m.activeWork[i].(workPack)
@@ -183,7 +207,9 @@ func (m processModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case sliceWorkUpdateMsg:
-		emitDetail(processing, "%s: cut slice %s", activeWorkName(m.activeWork, msg.id), msg.slice.path)
+		if detailOn() {
+			emitDetail(processing, "%s: cut slice %s", activeWorkName(m.activeWork, msg.id), msg.slice.path)
+		}
 		for i := range m.activeWork {
 			if m.activeWork[i].ID() == msg.id {
 				wp := m.activeWork[i].(workSlice)
@@ -193,23 +219,32 @@ func (m processModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case finishWorkMsg:
+		before := len(m.finishedWork)
 		move(msg.id, &m.activeWork, &m.finishedWork)
 		// The moved copy carries the bins and slices accumulated by the update
 		// messages; the one on the msg does not.
-		if n := len(m.finishedWork); n > 0 {
-			emitPhase(processing, "%s", workResultLine(m.finishedWork[n-1]))
+		if len(m.finishedWork) > before {
+			emitPhase(processing, "%s", workResultLine(m.finishedWork[len(m.finishedWork)-1]))
 		}
 
 	// 5. Writing
 
 	case processingCompleteMsg:
+		// Spritesheets and slices are already on disk by now, so this stops
+		// short of the resource files rather than claiming nothing was written.
+		if len(m.exceptions) > 0 {
+			emitPhase(processing, "%s, stopped before writing resources", plural(len(m.exceptions), "error"))
+			emitSummary(m.summaryLine())
+			m.phase = done
+			return m, tea.Quit
+		}
 		m.phase = writing
 		emitPhase(writing, "%s", plural(len(m.finishedWork), "resource"))
 		m.numWriteTotal = len(m.finishedWork)
 		m.numWriteDone = 0
 		ch := make(chan writeProgressMsg)
 		m.writeCh = ch
-		return m, tea.Batch(startWriting(m.finishedWork, ch), waitForWriteProgress(ch))
+		return m, tea.Batch(startWriting(slices.Clone(m.finishedWork), ch), waitForWriteProgress(ch))
 
 	case writeProgressMsg:
 		m.numWriteDone = msg.done
@@ -220,15 +255,18 @@ func (m processModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.phase = done
 		if mf, ok := buildManifest(m.folders, m.finishedWork, m.exceptions); ok {
 			if err := mf.save(); err != nil {
+				// An unwritten cache makes the next run rebuild everything, so
+				// it fails the run rather than just printing a note.
 				m.manifestNote = "Could not write the build cache: " + err.Error()
+				exc := exception{code: systemError, msg: m.manifestNote}
+				m.exceptions = append(m.exceptions, exc)
+				emitException(exc)
 			}
 		} else {
 			m.manifestNote = "Build cache not updated because of unattributable errors; the next run will rebuild everything."
+			emitWarning(m.manifestNote)
 		}
 		emitSummary(m.summaryLine())
-		if m.manifestNote != "" && sesh.CLI {
-			fmt.Fprintln(os.Stderr, m.manifestNote)
-		}
 		return m, tea.Quit
 
 	// -. Shared
@@ -239,10 +277,9 @@ func (m processModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case logMsg:
 		m.logs = append(m.logs, msg.msg)
-
-	case warnMsg:
-		m.logs = append(m.logs, msg.msg)
-		emitWarning(msg.msg)
+		if len(m.logs) > maxLogHeight {
+			m.logs = m.logs[len(m.logs)-maxLogHeight:]
+		}
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -251,6 +288,8 @@ func (m processModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch keypress := msg.String(); keypress {
 		case "ctrl+c":
+			// Quitting a finished run is not an abort.
+			m.aborted = m.phase != done
 			return m, tea.Quit
 		case "esc":
 			if m.phase == done {
@@ -494,6 +533,6 @@ func (m processModel) summaryLine() string {
 			sliced++
 		}
 	}
-	return fmt.Sprintf("%d folders, %d packed, %d sliced, %d skipped, %d errors",
-		len(m.folders), packed, sliced, sesh.FoldersSkipped.Load(), len(m.exceptions))
+	return fmt.Sprintf("%s, %d packed, %d sliced, %d skipped, %s",
+		plural(len(m.folders), "folder"), packed, sliced, sesh.FoldersSkipped.Load(), plural(len(m.exceptions), "error"))
 }

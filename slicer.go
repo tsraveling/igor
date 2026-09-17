@@ -53,8 +53,10 @@ func slice(w workSlice) {
 			slicePath := filepath.Join(outDir, filename)
 
 			if err := saveSlice(sliceImg, slicePath); err != nil {
+				// The run stops on any exception, so there is nothing to gain
+				// by cutting the rest of this image.
 				prg.Send(toException(err, &w.file))
-				continue
+				return
 			}
 
 			actualSlicer := rect{x: slicer.x, y: slicer.y, w: clampedW, h: clampedH}

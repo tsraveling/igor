@@ -28,8 +28,9 @@ func tier() outputTier {
 	}
 }
 
-// Reads the version stamped in by the go toolchain. Local builds have no
-// version, so they report "dev".
+// Reads the version stamped in by the go toolchain. An installed build reports
+// its tag; a local build reports the VCS pseudo-version the toolchain stamps
+// in, and only a binary built without module info falls back to "dev".
 func buildVersion() string {
 	bi, ok := debug.ReadBuildInfo()
 	if !ok || bi.Main.Version == "" || bi.Main.Version == "(devel)" {
@@ -55,6 +56,12 @@ func emitPhase(p phase, format string, args ...any) {
 	cliLine(tierNormal, fmt.Sprintf("[%s] %s", strings.ToLower(phaseNames[p]), fmt.Sprintf(format, args...)))
 }
 
+// Whether per-image detail will actually be printed. Call sites check this
+// before doing the work of naming what they are about to log.
+func detailOn() bool {
+	return sesh.CLI && tier() >= tierVerbose
+}
+
 // Per-image and per-slice noise, shown under --verbose only.
 func emitDetail(p phase, format string, args ...any) {
 	cliLine(tierVerbose, fmt.Sprintf("[%s] %s", strings.ToLower(phaseNames[p]), fmt.Sprintf(format, args...)))
@@ -67,7 +74,7 @@ func emitException(exc exception) {
 	}
 	line := fmt.Sprintf("[%s] %s", exceptionCodeName(exc.code), exc.msg)
 	if exc.file != nil {
-		line += "\t" + filepath.Join(exc.file.path, exc.file.filename)
+		line += "\t" + filepath.Join(prj.Source, exc.file.path, exc.file.filename)
 	}
 	fmt.Fprintln(os.Stderr, line)
 }
@@ -79,6 +86,20 @@ func emitWarning(msg string) {
 		return
 	}
 	fmt.Fprintln(os.Stderr, "[WARNING] "+msg)
+}
+
+// Messages printed before the program starts, in either mode. In CLI mode they
+// go to stderr, keeping stdout to the phase lines and the summary, and are
+// suppressed under --quiet.
+func note(format string, args ...any) {
+	if !sesh.CLI {
+		fmt.Printf(format+"\n", args...)
+		return
+	}
+	if tier() < tierNormal {
+		return
+	}
+	fmt.Fprintf(os.Stderr, format+"\n", args...)
 }
 
 func emitSummary(line string) {

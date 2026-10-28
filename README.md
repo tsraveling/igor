@@ -118,6 +118,22 @@ You'll get
 TODO: Fill out from process established
 ```
 
+## CLI mode
+
+Igor runs its TUI when stdout is a terminal, and switches to plain text output when it is not, so piping into a file, a build script, or a CI job just works with no flags. `--cli` and `--tui` override that detection.
+
+Process output goes to stdout, one line per phase and per finished work piece. Errors and warnings go to stderr. `--quiet` cuts stdout down to the final summary; `--verbose` adds a line per trimmed image and per cut slice.
+
+```bash
+igor --cli > build.log
+igor --cli --quiet
+igor --verbose 2>&1 | grep TOO
+```
+
+`--nuke` and `--clean` delete files and normally confirm at a prompt. CLI mode cannot prompt, so they require `--force` there, and igor refuses before touching anything on disk rather than bailing halfway through a run. A prompt that cannot be answered, such as one with stdin redirected, is an error rather than a silent no.
+
+Exit codes: `0` on a clean run, `1` if any errors occurred, `130` on ctrl+c, `143` on SIGTERM. A build cache that cannot be written counts as an error, since the next run would otherwise silently rebuild everything.
+
 ## Incremental builds
 
 Igor tracks a content hash of every source folder in `<destination>/.igor-cache.json` and rebuilds only what changed. Commit that file so the team shares build state.

@@ -24,11 +24,11 @@ func writeEnvTscn(folderPath string, packs []workPack, slices []workSlice) {
 	// Add packed sprites (small images → .tres referencing spritesheet)
 	for _, wp := range packs {
 		for _, img := range wp.files {
-			spriteName := strings.TrimSuffix(img.filename, filepath.Ext(img.filename))
+			spriteName := img.baseName()
 			tresRelPath := filepath.Join(img.path, spriteName+".tres")
 			resPath := prj.resPath(tresRelPath)
 			layers = append(layers, envLayer{
-				filename: img.filename,
+				filename: spriteName,
 				resPath:  resPath,
 				isScene:  false,
 				posX:     0,
@@ -39,11 +39,11 @@ func writeEnvTscn(folderPath string, packs []workPack, slices []workSlice) {
 
 	// Add sliced sprites (large images → sub .tscn scenes)
 	for _, ws := range slices {
-		basename := strings.TrimSuffix(ws.file.filename, filepath.Ext(ws.file.filename))
+		basename := ws.file.baseName()
 		tscnRelPath := filepath.Join(ws.file.path, basename, basename+".tscn")
 		resPath := prj.resPath(tscnRelPath)
 		layers = append(layers, envLayer{
-			filename: ws.file.filename,
+			filename: basename,
 			resPath:  resPath,
 			isScene:  true,
 			posX:     ws.file.trim.x,
@@ -55,7 +55,8 @@ func writeEnvTscn(folderPath string, packs []workPack, slices []workSlice) {
 		return
 	}
 
-	// Sort alphabetically by filename
+	// Sort alphabetically by layer name. Pieces of a divided image carry
+	// reading-order suffixes, so they stay next to each other and in order.
 	sort.Slice(layers, func(i, j int) bool {
 		return layers[i].filename < layers[j].filename
 	})
@@ -81,7 +82,7 @@ func writeEnvTscn(folderPath string, packs []workPack, slices []workSlice) {
 	// Child nodes, layered in alphabetical order
 	for i, l := range layers {
 		id := fmt.Sprintf("%d", i+1)
-		nodeName := strings.TrimSuffix(l.filename, filepath.Ext(l.filename))
+		nodeName := l.filename
 
 		if l.isScene {
 			b.WriteString(fmt.Sprintf("\n[node name=\"%s\" parent=\".\" instance=ExtResource(\"%s\")]\n", nodeName, id))

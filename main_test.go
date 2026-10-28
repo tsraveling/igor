@@ -487,3 +487,272 @@ func TestConflictingFlags(t *testing.T) {
 		}
 	}
 }
+
+// One solid rectangle of a fixture image. Alpha 0 means fully opaque, so the
+// common case stays terse.
+type block struct {
+	x, y, w, h int
+	alpha      uint8
+}
+
+// Draws blocks on a transparent canvas, giving divideAbove known clusters.
+func writeBlocks(t *testing.T, path string, w, h int, blocks []block) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	img := image.NewNRGBA(image.Rect(0, 0, w, h))
+	for _, b := range blocks {
+		a := b.alpha
+		if a == 0 {
+			a = 255
+		}
+		for y := b.y; y < b.y+b.h; y++ {
+			for x := b.x; x < b.x+b.w; x++ {
+				img.Set(x, y, color.NRGBA{R: 200, G: 40, B: 90, A: a})
+			}
+		}
+	}
+	writeImage(t, path, img)
+}
+
+func projectWith(t *testing.T, rules string) string {
+	t.Helper()
+	dir := t.TempDir()
+	cfg := "destination: ./out\nsource: ./in\nspritesheet-size: 128\nslice-size: 64\nres-prefix: out/\nrules:\n" + rules
+	if err := os.WriteFile(filepath.Join(dir, "igor.yml"), []byte(cfg), 0644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func readFile(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
+// The atlas region a .tres points at. Pieces are given distinct sizes in these
+// fixtures, so the region identifies which one landed where.
+func regionOf(t *testing.T, path string) rect {
+	t.Helper()
+	var r rect
+	for _, line := range strings.Split(readFile(t, path), "\n") {
+		if n, _ := fmt.Sscanf(line, "region = Rect2(%d, %d, %d, %d)", &r.x, &r.y, &r.w, &r.h); n == 4 {
+			return r
+		}
+	}
+	t.Fatalf("no region in %s", path)
+	return r
+}
+
+func mustRun(t *testing.T, dir string, args ...string) result {
+	t.Helper()
+	r := runIgor(t, dir, args...)
+	if r.code != 0 {
+		t.Fatalf("exit %d, want 0\nstdout:\n%s\nstderr:\n%s", r.code, r.stdout, r.stderr)
+	}
+	return r
+}
+
+// Four blocks arranged so that strict top-to-bottom order and reading order
+// disagree: the tall block starts highest, but the small one to its left
+// shares its row and so comes first.
+func readingOrderFixture(t *testing.T, rules string) string {
+	t.Helper()
+	dir := projectWith(t, rules)
+	writeBlocks(t, filepath.Join(dir, "in", "items", "props", "cluster.png"), 100, 100, []block{
+		{x: 50, y: 0, w: 10, h: 30},
+		{x: 5, y: 10, w: 9, h: 9},
+		{x: 70, y: 60, w: 12, h: 12},
+		{x: 5, y: 65, w: 11, h: 11},
+	})
+	return dir
+}
+
+func TestItemModeDividesInReadingOrder(t *testing.T) {
+	dir := readingOrderFixture(t, "  \"items/**\": { mode: item, divideAbove: 10 }\n")
+	mustRun(t, dir, "--cli")
+
+	// Row one is the 9x9 then the 10x30; row two the 11x11 then the 12x12.
+	want := []rect{{w: 9, h: 9}, {w: 10, h: 30}, {w: 11, h: 11}, {w: 12, h: 12}}
+	for i, w := range want {
+		name := fmt.Sprintf("cluster_%02d.tres", i+1)
+		got := regionOf(t, filepath.Join(dir, "out", "items", "props", name))
+		if got.w != w.w || got.h != w.h {
+			t.Errorf("%s is %dx%d, want %dx%d", name, got.w, got.h, w.w, w.h)
+		}
+	}
+}
+
+func TestItemModeOmitsMargin(t *testing.T) {
+	dir := readingOrderFixture(t, "  \"items/**\": { mode: item, divideAbove: 10 }\n")
+	mustRun(t, dir, "--cli")
+
+	for i := 1; i <= 4; i++ {
+		name := fmt.Sprintf("cluster_%02d.tres", i)
+		if body := readFile(t, filepath.Join(dir, "out", "items", "props", name)); strings.Contains(body, "margin") {
+			t.Errorf("%s carries a margin:\n%s", name, body)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "out", "items", "props", "props.tscn")); err == nil {
+		t.Error("item mode wrote a scene")
+	}
+}
+
+func TestItemModeWithoutDivideKeepsWholeImage(t *testing.T) {
+	dir := projectWith(t, "  \"items/**\": { mode: item }\n")
+	writeBlocks(t, filepath.Join(dir, "in", "items", "props", "plant.png"), 100, 100, []block{
+		{x: 5, y: 5, w: 10, h: 10},
+		{x: 45, y: 45, w: 12, h: 12},
+	})
+	mustRun(t, dir, "--cli")
+
+	// No divideAbove, so the two clusters stay one texture spanning both.
+	got := regionOf(t, filepath.Join(dir, "out", "items", "props", "plant.tres"))
+	if got.w != 52 || got.h != 52 {
+		t.Errorf("region is %dx%d, want 52x52", got.w, got.h)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "out", "items", "props", "plant_01.tres")); err == nil {
+		t.Error("undivided image was split anyway")
+	}
+}
+
+// A chain of near-invisible pixels between two blocks is enough to weld them
+// into one item, which is what alphaThreshold exists to ignore.
+func bridgedFixture(t *testing.T, rules string) string {
+	t.Helper()
+	dir := projectWith(t, rules)
+	writeBlocks(t, filepath.Join(dir, "in", "items", "props", "bridged.png"), 64, 40, []block{
+		{x: 10, y: 10, w: 10, h: 10},
+		{x: 40, y: 10, w: 10, h: 10},
+		{x: 25, y: 14, w: 1, h: 1, alpha: 2},
+		{x: 33, y: 14, w: 1, h: 1, alpha: 2},
+	})
+	return dir
+}
+
+func TestFaintPixelsBridgeItemsByDefault(t *testing.T) {
+	dir := bridgedFixture(t, "  \"items/**\": { mode: item, divideAbove: 10 }\n")
+	mustRun(t, dir, "--cli")
+
+	// One piece, so it keeps the source name rather than taking a suffix.
+	if _, err := os.Stat(filepath.Join(dir, "out", "items", "props", "bridged.tres")); err != nil {
+		t.Errorf("expected a single welded item: %v", err)
+	}
+}
+
+func TestAlphaThresholdSeparatesBridgedItems(t *testing.T) {
+	dir := bridgedFixture(t, "  \"items/**\": { mode: item, divideAbove: 10, alphaThreshold: 4 }\n")
+	mustRun(t, dir, "--cli")
+
+	for _, name := range []string{"bridged_01.tres", "bridged_02.tres"} {
+		if _, err := os.Stat(filepath.Join(dir, "out", "items", "props", name)); err != nil {
+			t.Errorf("missing %s: %v", name, err)
+		}
+	}
+	for i, want := range []int{10, 10} {
+		name := fmt.Sprintf("bridged_%02d.tres", i+1)
+		if got := regionOf(t, filepath.Join(dir, "out", "items", "props", name)); got.w != want {
+			t.Errorf("%s is %d wide, want %d", name, got.w, want)
+		}
+	}
+}
+
+func TestDivideAboveIgnoredInCharacterMode(t *testing.T) {
+	dir := projectWith(t, "  \"chars/**\": { mode: character, divideAbove: 10 }\n")
+	for _, name := range []string{"jump-01.png", "jump-02.png"} {
+		writeBlocks(t, filepath.Join(dir, "in", "chars", "alice", "jump", name), 64, 40, []block{
+			{x: 5, y: 5, w: 10, h: 10},
+			{x: 40, y: 5, w: 10, h: 10},
+		})
+	}
+	r := mustRun(t, dir, "--cli")
+
+	if !strings.Contains(r.stderr, "divideAbove ignored in character mode") {
+		t.Errorf("no warning on stderr:\n%s", r.stderr)
+	}
+	// Each frame stays whole, spanning both blocks.
+	got := regionOf(t, filepath.Join(dir, "out", "chars", "alice", "jump", "jump-01.tres"))
+	if got.w != 45 {
+		t.Errorf("frame is %d wide, want 45 (undivided)", got.w)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "out", "chars", "alice", "jump", "jump-01_01.tres")); err == nil {
+		t.Error("an animation frame was divided")
+	}
+}
+
+// In env mode the pieces keep canvas-relative margins, so the scene can place
+// every one of them at the origin and still have the art line up.
+func TestDividedPiecesRejoinEnvScene(t *testing.T) {
+	dir := projectWith(t, "  \"env/**\": { mode: env, divideAbove: 10 }\n")
+	writeBlocks(t, filepath.Join(dir, "in", "env", "house", "decor.png"), 100, 60, []block{
+		{x: 5, y: 5, w: 10, h: 10},
+		{x: 60, y: 30, w: 12, h: 12},
+	})
+	mustRun(t, dir, "--cli")
+
+	first := readFile(t, filepath.Join(dir, "out", "env", "house", "decor_01.tres"))
+	if !strings.Contains(first, "margin = Rect2(5, 5, 90, 50)") {
+		t.Errorf("decor_01 lost its canvas offset:\n%s", first)
+	}
+	second := readFile(t, filepath.Join(dir, "out", "env", "house", "decor_02.tres"))
+	if !strings.Contains(second, "margin = Rect2(60, 30, 88, 48)") {
+		t.Errorf("decor_02 lost its canvas offset:\n%s", second)
+	}
+
+	scene := readFile(t, filepath.Join(dir, "out", "env", "house", "house.tscn"))
+	for _, node := range []string{"name=\"decor_01\"", "name=\"decor_02\""} {
+		if !strings.Contains(scene, node) {
+			t.Errorf("scene missing %s:\n%s", node, scene)
+		}
+	}
+}
+
+// A divided image's slice directories are named for the piece, not the source
+// PNG, so stale detection has to remember which source each one came from.
+func TestStaleDetectionFollowsDividedSlices(t *testing.T) {
+	dir := t.TempDir()
+	cfg := "destination: ./out\nsource: ./in\nspritesheet-size: 128\nslice-size: 16\nres-prefix: out/\nrules:\n" +
+		"  \"env/**\": { mode: env, divideAbove: 10 }\n"
+	if err := os.WriteFile(filepath.Join(dir, "igor.yml"), []byte(cfg), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	decor := filepath.Join(dir, "in", "env", "house", "decor.png")
+	writeBlocks(t, decor, 100, 60, []block{
+		{x: 5, y: 5, w: 20, h: 20},
+		{x: 60, y: 30, w: 20, h: 20},
+	})
+	writePNG(t, filepath.Join(dir, "in", "env", "house", "roof.png"), 10, 10)
+	mustRun(t, dir, "--cli")
+
+	// Both pieces exceed slice-size, so each gets its own directory.
+	for _, name := range []string{"decor_01", "decor_02"} {
+		if _, err := os.Stat(filepath.Join(dir, "out", "env", "house", name)); err != nil {
+			t.Fatalf("missing slice dir %s: %v", name, err)
+		}
+	}
+
+	// A run that still has the source must leave those directories alone.
+	mustRun(t, dir, "--cli", "--clean", "--force")
+	for _, name := range []string{"decor_01", "decor_02"} {
+		if _, err := os.Stat(filepath.Join(dir, "out", "env", "house", name)); err != nil {
+			t.Errorf("%s removed while its source was still present: %v", name, err)
+		}
+	}
+
+	if err := os.Remove(decor); err != nil {
+		t.Fatal(err)
+	}
+	mustRun(t, dir, "--cli", "--clean", "--force")
+	for _, name := range []string{"decor_01", "decor_02"} {
+		if _, err := os.Stat(filepath.Join(dir, "out", "env", "house", name)); err == nil {
+			t.Errorf("%s survived the removal of its source", name)
+		}
+	}
+}

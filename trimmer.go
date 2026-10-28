@@ -34,13 +34,13 @@ func trimImagesCmd(folders []folder) tea.Cmd {
 			for ii, img := range f.files {
 				wg.Add(1)
 				sem <- struct{}{} // This uses zero memory
-				go func(id int, folderIdx int, imageIdx int, img imageFile) {
+				go func(id int, folderIdx int, imageIdx int, img imageFile, cfg folderConfig) {
 					defer wg.Done()
 					defer func() { <-sem }()
 					name := filepath.Join(prj.Source, f.path, img.filename)
 					prg.Send(startedTrimmingMsg{id, name})
 
-					tR, err := getTrimRect(img)
+					tR, pieces, err := analyze(img, cfg)
 					if err != nil {
 						// An untrimmed image would pack at zero size and vanish
 						// from the atlas, so this fails the run.
@@ -55,12 +55,19 @@ func trimImagesCmd(folders []folder) tea.Cmd {
 						prg.Send(logMsg{img.filename + " " + tR.toStr()})
 					}
 
+					for _, p := range pieces {
+						if p.w < minItemSize || p.h < minItemSize {
+							warn(fmt.Sprintf("%s: item at %d,%d is only %dx%d", name, p.x, p.y, p.w, p.h))
+						}
+					}
+
 					mu.Lock()
 					folders[folderIdx].files[imageIdx].trim = *tR
+					folders[folderIdx].files[imageIdx].pieces = pieces
 					mu.Unlock()
 
 					prg.Send(finishedTrimmingMsg{id: id, img: name})
-				}(index, fi, ii, img)
+				}(index, fi, ii, img, f.config)
 				index++
 			}
 		}
@@ -70,15 +77,36 @@ func trimImagesCmd(folders []folder) tea.Cmd {
 	}
 }
 
-func getTrimRect(f imageFile) (*trimRect, error) {
+// One load serves both the trim rect and, where a rule asks for it, the
+// divideAbove pass; decoding a 9000x8000 PNG twice is not worth the tidier
+// split.
+func analyze(f imageFile, cfg folderConfig) (*trimRect, []rect, error) {
 	img, err := f.load()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	nrgba, ok := img.(*image.NRGBA)
 	if !ok {
-		return nil, fmt.Errorf("%s: expected NRGBA, got %T", filepath.Join(f.path, f.filename), img)
+		return nil, nil, fmt.Errorf("%s: expected NRGBA, got %T", filepath.Join(f.path, f.filename), img)
 	}
+
+	tR, err := trimRectOf(f, nrgba)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !cfg.dividing() {
+		return tR, nil, nil
+	}
+
+	pieces := divide(nrgba, tR.rect, cfg.divideAbove, cfg.alphaThreshold)
+	if len(pieces) == 0 {
+		return nil, nil, fmt.Errorf("%s: no pixels above alphaThreshold %d",
+			filepath.Join(f.path, f.filename), cfg.alphaThreshold)
+	}
+	return tR, pieces, nil
+}
+
+func trimRectOf(f imageFile, nrgba *image.NRGBA) (*trimRect, error) {
 
 	// 1. Start with the top
 	minY := -1

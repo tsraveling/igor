@@ -61,11 +61,11 @@ func findStale(mf manifest, source map[string]map[string]bool) []stalePath {
 			continue
 		}
 
-		for _, basename := range entry.Slices {
-			if files[basename] {
+		for _, s := range entry.Slices {
+			if files[s.Src] {
 				continue
 			}
-			out := filepath.Join(prj.Destination, folderPath, basename)
+			out := filepath.Join(prj.Destination, folderPath, s.Dir)
 			if _, err := os.Stat(out); err == nil {
 				stale = append(stale, stalePath{path: out, folder: folderPath})
 			}
@@ -151,11 +151,11 @@ func countImages(folders []folder) int {
 // An exception with no file attached can't be attributed at all, so it spoils
 // the whole run.
 func buildManifest(built []folder, work []workPiece, exceptions []exception) (manifest, bool) {
-	slices := map[string][]string{}
+	slices := map[string][]sliceEntry{}
 	for _, w := range work {
 		if ws, ok := w.(workSlice); ok {
-			basename := strings.TrimSuffix(ws.file.filename, filepath.Ext(ws.file.filename))
-			slices[ws.f.path] = append(slices[ws.f.path], basename)
+			src := strings.TrimSuffix(ws.file.filename, filepath.Ext(ws.file.filename))
+			slices[ws.f.path] = append(slices[ws.f.path], sliceEntry{Dir: ws.file.baseName(), Src: src})
 		}
 	}
 
@@ -180,8 +180,9 @@ func buildManifest(built []folder, work []workPiece, exceptions []exception) (ma
 			delete(mf.Folders, f.path)
 			continue
 		}
-		sort.Strings(slices[f.path])
-		mf.Folders[f.path] = folderEntry{Digest: runDigests[f.path], Slices: slices[f.path]}
+		entries := slices[f.path]
+		sort.Slice(entries, func(i, j int) bool { return entries[i].Dir < entries[j].Dir })
+		mf.Folders[f.path] = folderEntry{Digest: runDigests[f.path], Slices: entries}
 	}
 
 	return mf, true

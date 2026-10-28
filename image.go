@@ -6,6 +6,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 type imageFile struct {
@@ -14,6 +15,18 @@ type imageFile struct {
 	w, h     int
 	trim     trimRect
 	hash     string // sha256 of file contents, for incremental builds
+
+	pieces  []rect // sub-rects found by divideAbove, in reading order
+	outName string // output basename, when this is one piece of a divided image
+}
+
+// The name output files take: the piece name when this is one piece of a
+// divided image, otherwise the source filename without its extension.
+func (imf *imageFile) baseName() string {
+	if imf.outName != "" {
+		return imf.outName
+	}
+	return strings.TrimSuffix(imf.filename, filepath.Ext(imf.filename))
 }
 
 func (imf *imageFile) targetFolderPath() string {

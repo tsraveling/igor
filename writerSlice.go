@@ -12,7 +12,7 @@ func writeSliceTscn(ws workSlice) {
 		return
 	}
 
-	basename := strings.TrimSuffix(ws.file.filename, filepath.Ext(ws.file.filename))
+	basename := ws.file.baseName()
 	outDir := filepath.Join(prj.Destination, ws.file.path, basename)
 	tscnPath := filepath.Join(outDir, basename+".tscn")
 	trim := ws.file.trim

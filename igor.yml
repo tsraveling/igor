@@ -6,3 +6,4 @@ res-prefix: out/
 rules:
   "chars/**": { mode: character, renameLayers: true, includeCharName: true }
   "env/**": { mode: env }
+  "items/**": { mode: item, divideAbove: 16, alphaThreshold: 4 }

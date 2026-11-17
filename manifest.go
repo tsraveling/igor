@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -11,9 +12,13 @@ import (
 )
 
 // Bump when writer output format changes, to invalidate every cached digest.
-const manifestFormatVersion = 2
+const manifestFormatVersion = 3
 
 const manifestFilename = ".igor-cache.json"
+
+// The manifest as it was at the start of this run. Read-only once dirty
+// detection has filled it, so the packing and writing goroutines can share it.
+var priorManifest manifest
 
 // One sliced output directory. Dir is what landed on disk, Src the source PNG
 // it came from, which differ once divideAbove splits one PNG into several.
@@ -22,8 +27,29 @@ type sliceEntry struct {
 	Src string `json:"src"`
 }
 
+// Where one piece of a source image sits on a spritesheet. Name is empty
+// except for the pieces divideAbove cut out of a single PNG.
+type piecePlacement struct {
+	Name string `json:"name,omitempty"`
+	Bin  int    `json:"bin"`
+	X    int    `json:"x"`
+	Y    int    `json:"y"`
+	W    int    `json:"w"`
+	H    int    `json:"h"`
+}
+
+// Keyed by source filename rather than output sprite name, because output
+// names shift under renameLayers and source filenames do not.
+type fileRecord struct {
+	File   string           `json:"file"`
+	Hash   string           `json:"hash"`
+	Pieces []piecePlacement `json:"pieces,omitempty"`
+}
+
 type folderEntry struct {
 	Digest string       `json:"digest"`
+	Bins   int          `json:"bins,omitempty"`
+	Files  []fileRecord `json:"files,omitempty"`
 	Slices []sliceEntry `json:"slices,omitempty"`
 }
 
@@ -74,7 +100,14 @@ func (m manifest) save() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(manifestPath(), append(data, '\n'), 0644)
+	data = append(data, '\n')
+
+	// The cache is committed now, so an unchanged run must leave it alone.
+	// Kept out of the written/unchanged counters, which report art.
+	if old, err := os.ReadFile(manifestPath()); err == nil && bytes.Equal(old, data) {
+		return nil
+	}
+	return os.WriteFile(manifestPath(), data, 0644)
 }
 
 // Covers the project settings that change every folder's output.

@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 )
@@ -17,21 +16,34 @@ func writeSliceTscn(ws workSlice) {
 	tscnPath := filepath.Join(outDir, basename+".tscn")
 	trim := ws.file.trim
 
-	var b strings.Builder
+	old := readGodotFile(tscnPath)
 
-	// Header: load_steps = ext_resources + 1
-	b.WriteString(fmt.Sprintf("[gd_scene load_steps=%d format=3]\n\n", len(ws.slices)+1))
-
-	// ext_resource entries for each slice texture
+	resPaths := make([]string, len(ws.slices))
 	for i, s := range ws.slices {
-		id := fmt.Sprintf("%d", i+1)
 		relPath, err := filepath.Rel(prj.Destination, s.path)
 		if err != nil {
 			prg.Send(toException(err, nil))
 			return
 		}
-		resPath := prj.resPath(relPath)
-		b.WriteString(fmt.Sprintf("[ext_resource type=\"Texture2D\" path=\"%s\" id=\"%s\"]\n", resPath, id))
+		resPaths[i] = prj.resPath(relPath)
+	}
+
+	alloc := newIDAllocator(old)
+	ids := make([]string, len(ws.slices))
+	for i, p := range resPaths {
+		ids[i] = alloc.sceneID(p)
+	}
+
+	var b strings.Builder
+
+	// Header: load_steps = ext_resources + 1
+	b.WriteString(carryHeader(old, "gd_scene", "",
+		fmt.Sprintf("[gd_scene load_steps=%d format=3]", len(ws.slices)+1), len(ws.slices)+1))
+	b.WriteString("\n\n")
+
+	// ext_resource entries for each slice texture
+	for i, p := range resPaths {
+		b.WriteString(extResourceLine("Texture2D", p, ids[i], old))
 	}
 
 	// Root Node2D
@@ -39,7 +51,7 @@ func writeSliceTscn(ws workSlice) {
 
 	// Child Sprite2D for each slice, positioned to reassemble the original
 	for i, s := range ws.slices {
-		id := fmt.Sprintf("%d", i+1)
+		id := ids[i]
 		sliceName := fmt.Sprintf("%s_x%02d", basename, i+1)
 		posX := s.x - trim.x
 		posY := s.y - trim.y
@@ -52,7 +64,7 @@ func writeSliceTscn(ws workSlice) {
 		b.WriteString(fmt.Sprintf("texture = ExtResource(\"%s\")\n", id))
 	}
 
-	if err := os.WriteFile(tscnPath, []byte(b.String()), 0644); err != nil {
+	if _, err := writeIfChanged(tscnPath, []byte(b.String())); err != nil {
 		prg.Send(toException(err, &ws.file))
 	}
 }

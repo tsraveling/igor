@@ -14,6 +14,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 )
 
 // The repo's own test/ folder is gitignored, so every case builds its own
@@ -754,5 +755,536 @@ func TestStaleDetectionFollowsDividedSlices(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(dir, "out", "env", "house", name)); err == nil {
 			t.Errorf("%s survived the removal of its source", name)
 		}
+	}
+}
+
+// --- Incremental layout and identity ------------------------------------
+
+// Modification times across the output tree, for proving which files a run
+// actually rewrote. writeIfChanged means an untouched file keeps its mtime.
+func snapshot(t *testing.T, root string) map[string]time.Time {
+	t.Helper()
+	out := map[string]time.Time{}
+
+	err := filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(root, p)
+		if err != nil {
+			return err
+		}
+		out[rel] = info.ModTime()
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// Paths that were written or created between the two snapshots.
+func rewritten(before, after map[string]time.Time) []string {
+	var out []string
+	for p, now := range after {
+		if was, ok := before[p]; !ok || !was.Equal(now) {
+			out = append(out, p)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// Every region rect in the output tree, keyed by the .tres that carries it.
+func regionsIn(t *testing.T, root string) map[string]rect {
+	t.Helper()
+	out := map[string]rect{}
+
+	err := filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || filepath.Ext(p) != ".tres" {
+			return nil
+		}
+		for _, line := range strings.Split(readFile(t, p), "\n") {
+			var r rect
+			if n, _ := fmt.Sscanf(line, "region = Rect2(%d, %d, %d, %d)", &r.x, &r.y, &r.w, &r.h); n == 4 {
+				rel, _ := filepath.Rel(root, p)
+				out[rel] = r
+				return nil
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// Rewrites the output tree the way Godot does on import: a uid on every header
+// and every ext_resource, igor's load_steps dropped from AtlasTextures, and
+// one added to the SpriteFrames resource that igor leaves without.
+func stampUIDs(t *testing.T, root string) {
+	t.Helper()
+	n := 0
+	nextUID := func() string {
+		n++
+		return fmt.Sprintf("uid://igortest%05d", n)
+	}
+
+	err := filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if ext := filepath.Ext(p); d.IsDir() || (ext != ".tres" && ext != ".tscn") {
+			return nil
+		}
+
+		lines := strings.Split(readFile(t, p), "\n")
+		exts := 0
+		for _, l := range lines {
+			if strings.HasPrefix(l, "[ext_resource ") {
+				exts++
+			}
+		}
+
+		for i, line := range lines {
+			switch {
+			case strings.HasPrefix(line, "[gd_resource "), strings.HasPrefix(line, "[gd_scene "):
+				if strings.Contains(line, `type="AtlasTexture"`) {
+					line = strings.Replace(line, " load_steps=2", "", 1)
+				}
+				if strings.Contains(line, `type="SpriteFrames"`) {
+					line = strings.Replace(line, " format=3",
+						fmt.Sprintf(" load_steps=%d format=3", exts+1), 1)
+				}
+				lines[i] = strings.TrimSuffix(line, "]") + fmt.Sprintf(" uid=%q]", nextUID())
+			case strings.HasPrefix(line, "[ext_resource "):
+				lines[i] = strings.Replace(line, " path=", fmt.Sprintf(" uid=%q path=", nextUID()), 1)
+			}
+		}
+		return os.WriteFile(p, []byte(strings.Join(lines, "\n")), 0644)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// One character with two animations, plus an environment package whose layers
+// all trim to different sizes so a region identifies which sprite is where.
+func layoutFixture(t *testing.T) string {
+	t.Helper()
+	dir := projectWith(t, "  \"env/**\": { mode: env }\n  \"chars/**\": { mode: character }\n")
+
+	for i, sz := range []int{10, 12, 14, 16} {
+		writeBlocks(t, filepath.Join(dir, "in", "env", "house", fmt.Sprintf("layer_%02d.png", i)),
+			40, 40, []block{{x: 5, y: 5, w: sz, h: sz}})
+	}
+	for _, name := range []string{"jump-01.png", "jump-02.png", "jump-03.png"} {
+		writePNG(t, filepath.Join(dir, "in", "chars", "alice", "jump", name), 16, 16)
+	}
+	for _, name := range []string{"run-01.png", "run-02.png"} {
+		writePNG(t, filepath.Join(dir, "in", "chars", "alice", "run", name), 18, 18)
+	}
+	return dir
+}
+
+// The whole point: a rebuild of unchanged art reproduces what Godot left on
+// disk, byte for byte, uids included.
+func TestRebuildIsIdempotentAfterGodotImport(t *testing.T) {
+	dir := layoutFixture(t)
+	out := filepath.Join(dir, "out")
+	mustRun(t, dir, "--cli")
+
+	stampUIDs(t, out)
+	before := snapshot(t, out)
+
+	r := mustRun(t, dir, "--cli", "--all")
+	if changed := rewritten(before, snapshot(t, out)); len(changed) > 0 {
+		t.Errorf("a rebuild of unchanged art rewrote %d file(s): %v", len(changed), changed)
+	}
+	if !strings.Contains(r.stdout, "0 files written") {
+		t.Errorf("summary should report nothing written:\n%s", r.stdout)
+	}
+}
+
+// Godot's uid and igor's ext_resource ids both have to survive a rebuild, or
+// every scene referencing the resource goes stale.
+func TestUIDsAndIDsSurviveRebuild(t *testing.T) {
+	dir := layoutFixture(t)
+	out := filepath.Join(dir, "out")
+	mustRun(t, dir, "--cli")
+	stampUIDs(t, out)
+
+	frames := filepath.Join(out, "chars", "alice", "alice_frames.tres")
+	wantFrames := readFile(t, frames)
+	tres := filepath.Join(out, "chars", "alice", "jump", "jump-01.tres")
+	wantTres := readFile(t, tres)
+
+	mustRun(t, dir, "--cli", "--all")
+
+	if got := readFile(t, tres); got != wantTres {
+		t.Errorf("AtlasTexture lost its identity:\nwant:\n%s\ngot:\n%s", wantTres, got)
+	}
+	if got := readFile(t, frames); got != wantFrames {
+		t.Errorf("SpriteFrames lost its identity:\nwant:\n%s\ngot:\n%s", wantFrames, got)
+	}
+	if !strings.Contains(wantTres, "uid://") {
+		t.Fatal("fixture never stamped a uid, so this proves nothing")
+	}
+}
+
+// Editing one animation frame used to rewrite every sibling animation in the
+// character, through the frames.tres that was built from the work queue.
+func TestOneFrameEditStaysInItsFolder(t *testing.T) {
+	dir := layoutFixture(t)
+	out := filepath.Join(dir, "out")
+	mustRun(t, dir, "--cli")
+	before := snapshot(t, out)
+
+	// Same trimmed size, different pixels: the sheet is redrawn, nothing moves.
+	writeBlocks(t, filepath.Join(dir, "in", "chars", "alice", "jump", "jump-02.png"),
+		16, 16, []block{{x: 1, y: 1, w: 14, h: 14, alpha: 128}})
+	mustRun(t, dir, "--cli")
+
+	for _, p := range rewritten(before, snapshot(t, out)) {
+		if p == manifestFilename {
+			continue
+		}
+		if !strings.HasPrefix(p, filepath.Join("chars", "alice", "jump")+string(filepath.Separator)) {
+			t.Errorf("editing one frame rewrote %s", p)
+		}
+	}
+}
+
+// Content decides whether a region is redrawn; only size decides whether it
+// moves. An artist's textural tweak to one layer used to reflow the package.
+func TestEnvLayerEditKeepsEveryRegionIncludingItsOwn(t *testing.T) {
+	dir := layoutFixture(t)
+	out := filepath.Join(dir, "out")
+	edited := filepath.Join(out, "env", "house", "layer_01.tres")
+
+	mustRun(t, dir, "--cli")
+	before := regionsIn(t, out)
+	wasBody := readFile(t, edited)
+
+	// Same trimmed size, different alpha bbox: the margin moves, the slot does not.
+	writeBlocks(t, filepath.Join(dir, "in", "env", "house", "layer_01.png"),
+		40, 40, []block{{x: 20, y: 18, w: 12, h: 12}})
+	mustRun(t, dir, "--cli")
+
+	if readFile(t, edited) == wasBody {
+		t.Fatal("the edited layer's .tres did not change, so this proves nothing")
+	}
+
+	after := regionsIn(t, out)
+	for p, was := range before {
+		if after[p] != was {
+			t.Errorf("%s moved from %v to %v", p, was, after[p])
+		}
+	}
+	if len(after) != len(before) {
+		t.Errorf("sprite count changed: %d -> %d", len(before), len(after))
+	}
+}
+
+// A sprite that outgrows its slot has to move. Everything else has to not.
+func TestGrownSpriteMovesAlone(t *testing.T) {
+	dir := layoutFixture(t)
+	out := filepath.Join(dir, "out")
+	mustRun(t, dir, "--cli")
+	before := regionsIn(t, out)
+
+	writeBlocks(t, filepath.Join(dir, "in", "env", "house", "layer_01.png"),
+		40, 40, []block{{x: 2, y: 2, w: 30, h: 30}})
+	mustRun(t, dir, "--cli")
+
+	after := regionsIn(t, out)
+	grown := filepath.Join("env", "house", "layer_01.tres")
+	if after[grown] == before[grown] {
+		t.Errorf("the grown sprite kept its old slot %v", before[grown])
+	}
+	for p, was := range before {
+		if p == grown {
+			continue
+		}
+		if after[p] != was {
+			t.Errorf("%s moved from %v to %v after a sibling grew", p, was, after[p])
+		}
+	}
+}
+
+// Adding an animation must not disturb the ones already there, and must not
+// renumber the ext_resource ids in the character's frames.tres.
+func TestNewAnimationLeavesExistingOnesAlone(t *testing.T) {
+	dir := layoutFixture(t)
+	out := filepath.Join(dir, "out")
+	mustRun(t, dir, "--cli")
+	stampUIDs(t, out)
+
+	frames := filepath.Join(out, "chars", "alice", "alice_frames.tres")
+	wasIDs := extIDsOf(t, frames)
+	before := snapshot(t, out)
+
+	for _, name := range []string{"idle-01.png", "idle-02.png"} {
+		writePNG(t, filepath.Join(dir, "in", "chars", "alice", "idle", name), 12, 12)
+	}
+	mustRun(t, dir, "--cli")
+
+	for _, p := range rewritten(before, snapshot(t, out)) {
+		switch {
+		case p == manifestFilename,
+			p == filepath.Join("chars", "alice", "alice_frames.tres"),
+			strings.HasPrefix(p, filepath.Join("chars", "alice", "idle")+string(filepath.Separator)):
+			continue
+		}
+		t.Errorf("adding an animation rewrote %s", p)
+	}
+
+	nowIDs := extIDsOf(t, frames)
+	for path, id := range wasIDs {
+		if nowIDs[path] != id {
+			t.Errorf("%s was renumbered from %q to %q", path, id, nowIDs[path])
+		}
+	}
+	if len(nowIDs) != len(wasIDs)+2 {
+		t.Errorf("frames.tres holds %d entries, want %d", len(nowIDs), len(wasIDs)+2)
+	}
+}
+
+// res path -> ext_resource id, in the order the file lists them.
+func extIDsOf(t *testing.T, path string) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	for _, line := range strings.Split(readFile(t, path), "\n") {
+		if !strings.HasPrefix(line, "[ext_resource ") {
+			continue
+		}
+		if p := attrOf(line, "path"); p != "" {
+			out[p] = attrOf(line, "id")
+		}
+	}
+	if len(out) == 0 {
+		t.Fatalf("no ext_resources in %s", path)
+	}
+	return out
+}
+
+// The manifest is load-bearing now, so losing it has to degrade to a rebuild
+// rather than to output that points at files which are not there.
+func TestMissingManifestRebuildsCleanly(t *testing.T) {
+	dir := layoutFixture(t)
+	out := filepath.Join(dir, "out")
+	mustRun(t, dir, "--cli")
+
+	if err := os.Remove(filepath.Join(out, manifestFilename)); err != nil {
+		t.Fatal(err)
+	}
+	mustRun(t, dir, "--cli")
+
+	frames := filepath.Join(out, "chars", "alice", "alice_frames.tres")
+	for p := range extIDsOf(t, frames) {
+		rel := strings.TrimPrefix(p, "res://out/")
+		if _, err := os.Stat(filepath.Join(out, filepath.FromSlash(rel))); err != nil {
+			t.Errorf("frames.tres points at a missing file: %s", p)
+		}
+	}
+}
+
+// A clone with no cache recovers its layout from the .tres files already in
+// the output tree, rather than reflowing every sheet on its first run. Growing
+// the first layer is what makes this bite: a fresh pack would shift every
+// layer after it.
+func TestLayoutIsAdoptedFromDiskWithoutManifest(t *testing.T) {
+	dir := layoutFixture(t)
+	out := filepath.Join(dir, "out")
+	mustRun(t, dir, "--cli")
+	before := regionsIn(t, out)
+
+	if err := os.Remove(filepath.Join(out, manifestFilename)); err != nil {
+		t.Fatal(err)
+	}
+	writeBlocks(t, filepath.Join(dir, "in", "env", "house", "layer_00.png"),
+		40, 40, []block{{x: 2, y: 2, w: 30, h: 30}})
+	mustRun(t, dir, "--cli")
+
+	grown := filepath.Join("env", "house", "layer_00.tres")
+	after := regionsIn(t, out)
+	for p, was := range before {
+		if p == grown {
+			continue
+		}
+		if after[p] != was {
+			t.Errorf("%s reflowed from %v to %v without a manifest", p, was, after[p])
+		}
+	}
+	if after[grown] == before[grown] {
+		t.Fatal("the grown layer kept its old slot, so this proves nothing")
+	}
+}
+
+// An adopted layout can be inconsistent in ways igor's own never is, so an
+// overlap has to cost the folder its layout rather than its pixels.
+func TestOverlappingAdoptedLayoutFallsBackToRepack(t *testing.T) {
+	dir := layoutFixture(t)
+	out := filepath.Join(dir, "out")
+	mustRun(t, dir, "--cli")
+
+	if err := os.Remove(filepath.Join(out, manifestFilename)); err != nil {
+		t.Fatal(err)
+	}
+
+	// Two layers now claim the same origin at their real sizes, so both look
+	// keepable and they collide.
+	for _, name := range []string{"layer_00.tres", "layer_01.tres"} {
+		p := filepath.Join(out, "env", "house", name)
+		body := readFile(t, p)
+		r := regionOf(t, p)
+		body = strings.Replace(body,
+			fmt.Sprintf("region = Rect2(%d, %d, %d, %d)", r.x, r.y, r.w, r.h),
+			fmt.Sprintf("region = Rect2(0, 0, %d, %d)", r.w, r.h), 1)
+		if err := os.WriteFile(p, []byte(body), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	mustRun(t, dir, "--cli")
+
+	regions := regionsIn(t, out)
+	for a, ra := range regions {
+		for b, rb := range regions {
+			if a >= b || filepath.Dir(a) != filepath.Dir(b) {
+				continue
+			}
+			if ra.intersects(rb) {
+				t.Errorf("%v and %v overlap after the fallback (%s, %s)", ra, rb, a, b)
+			}
+		}
+	}
+}
+
+// --repack is the only thing allowed to reflow a sheet, and it still must not
+// break the output.
+func TestRepackRunsClean(t *testing.T) {
+	dir := layoutFixture(t)
+	mustRun(t, dir, "--cli")
+	mustRun(t, dir, "--cli", "--all", "--repack")
+
+	frames := filepath.Join(dir, "out", "chars", "alice", "alice_frames.tres")
+	for p := range extIDsOf(t, frames) {
+		rel := strings.TrimPrefix(p, "res://out/")
+		if _, err := os.Stat(filepath.Join(dir, "out", filepath.FromSlash(rel))); err != nil {
+			t.Errorf("--repack left frames.tres pointing at %s", p)
+		}
+	}
+}
+
+// The folder an orphan sits in is usually clean by the time the human runs
+// --clean, so the scan cannot be driven off the work queue.
+func TestOrphanedTresRemovedFromCleanFolder(t *testing.T) {
+	dir := layoutFixture(t)
+	orphan := filepath.Join(dir, "out", "chars", "alice", "jump", "jump-03.tres")
+	mustRun(t, dir, "--cli")
+
+	if err := os.Remove(filepath.Join(dir, "in", "chars", "alice", "jump", "jump-03.png")); err != nil {
+		t.Fatal(err)
+	}
+
+	r := mustRun(t, dir, "--cli")
+	if !strings.Contains(r.stderr, "orphaned") {
+		t.Errorf("a deleted frame should be reported as an orphan:\n%s", r.stderr)
+	}
+	if _, err := os.Stat(orphan); err != nil {
+		t.Fatalf("the orphan was removed without --clean: %v", err)
+	}
+
+	// The folder is unchanged by now, so nothing reaches the writers.
+	r = mustRun(t, dir, "--cli", "--clean", "--force")
+	if !strings.Contains(r.stdout+r.stderr, "Removed 1 orphaned") {
+		t.Errorf("--clean did not remove the orphan:\n%s\n%s", r.stdout, r.stderr)
+	}
+	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
+		t.Errorf("%s survived --clean", orphan)
+	}
+}
+
+// A folder that shrinks from four sheets to two leaves the other two behind.
+func TestOrphanedBinsRemoved(t *testing.T) {
+	dir := t.TempDir()
+	cfg := "destination: ./out\nsource: ./in\nspritesheet-size: 32\nslice-size: 32\nres-prefix: out/\nrules:\n" +
+		"  \"env/**\": { mode: env }\n"
+	if err := os.WriteFile(filepath.Join(dir, "igor.yml"), []byte(cfg), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Two of these never share a sheet, so each takes its own bin.
+	for i := range 4 {
+		writeBlocks(t, filepath.Join(dir, "in", "env", "house", fmt.Sprintf("layer_%02d.png", i)),
+			32, 32, []block{{x: 0, y: 0, w: 24, h: 24}})
+	}
+	mustRun(t, dir, "--cli")
+
+	bins := func() []string {
+		t.Helper()
+		found, err := filepath.Glob(filepath.Join(dir, "out", "env", "house", "house_*.png"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		sort.Strings(found)
+		return found
+	}
+	if got := bins(); len(got) != 4 {
+		t.Fatalf("expected 4 bins, got %d: %v", len(got), got)
+	}
+
+	for _, i := range []int{2, 3} {
+		if err := os.Remove(filepath.Join(dir, "in", "env", "house", fmt.Sprintf("layer_%02d.png", i))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustRun(t, dir, "--cli")
+
+	if got := bins(); len(got) != 2 {
+		t.Errorf("expected 2 bins after shrinking, got %d: %v", len(got), got)
+	}
+}
+
+// The done view gained the written/unchanged counters and the repack hints.
+// Every other test shells out to the binary, so nothing else renders it.
+func TestDoneViewRendersCountersAndHints(t *testing.T) {
+	sesh.FilesWritten.Store(3)
+	sesh.FilesUnchanged.Store(41)
+	sesh.FoldersSkipped.Store(7)
+	t.Cleanup(func() {
+		sesh.FilesWritten.Store(0)
+		sesh.FilesUnchanged.Store(0)
+		sesh.FoldersSkipped.Store(0)
+	})
+
+	m := processModel{
+		phase:       done,
+		width:       100,
+		folders:     []folder{{path: "env/house"}},
+		repackHints: []string{"env/house: --repack would save 44% of its sheet area"},
+	}
+
+	view := m.View()
+	for _, want := range []string{"3 files written", "41 unchanged", "7 unchanged folders skipped", "--repack would save 44%"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("done view missing %q:\n%s", want, view)
+		}
+	}
+
+	if line := m.summaryLine(); !strings.Contains(line, "3 files written, 41 unchanged") {
+		t.Errorf("summary line reads %q", line)
 	}
 }

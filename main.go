@@ -99,7 +99,7 @@ func handleStale() (bool, int) {
 		return true, 0
 	}
 
-	note("These %d output path(s) no longer have sources:", len(stale))
+	note("These %d output path(s) no longer have sources. Deleting them loses the Godot uids they hold:", len(stale))
 	for _, s := range stale {
 		note("  %s", s.path)
 	}
@@ -135,6 +135,57 @@ func handleStale() (bool, int) {
 	return true, 0
 }
 
+// renameLayers names by alphabetical position, so inserting a frame renames
+// every later one and breaks any scene that referenced it by uid. Nothing can
+// prevent that without a breaking change to naming, so it is said loudly.
+func reportRenames() {
+	renames := sesh.takeRenames()
+	if len(renames) == 0 {
+		return
+	}
+
+	note("%d sprite(s) were renamed by position. Scenes referencing them by the old name will break:", len(renames))
+	for _, r := range renames {
+		note("  %s", r)
+	}
+}
+
+// .tres left behind by a deleted frame or a rename. Igor cannot see the scenes
+// that may still reference them, so they are removed only when asked.
+func handleOrphans() int {
+	orphans := sesh.takeOrphans()
+	if len(orphans) == 0 {
+		return 0
+	}
+
+	if !sesh.Clean {
+		note("%d orphaned .tres file(s) no longer have a sprite. Run with --clean to remove them.", len(orphans))
+		return 0
+	}
+
+	note("These %d .tres file(s) no longer have a sprite:", len(orphans))
+	for _, o := range orphans {
+		note("  %s", o)
+	}
+	ok, code := confirmOrFail("Delete them?")
+	if code != 0 {
+		return code
+	}
+	if !ok {
+		note("Cancelled.")
+		return 0
+	}
+
+	for _, o := range orphans {
+		if err := os.Remove(o); err != nil {
+			fmt.Fprintf(os.Stderr, "Error removing %s: %s\n", o, err.Error())
+			return 1
+		}
+	}
+	note("Removed %d orphaned .tres file(s).", len(orphans))
+	return 0
+}
+
 // Fills in sesh from the command line. Returns the positional arguments, or a
 // nonzero exit code if the flags do not make sense together.
 func parseArgs(args []string) ([]string, int) {
@@ -149,6 +200,8 @@ func parseArgs(args []string) ([]string, int) {
 			sesh.Nuke = true
 		case "--clean":
 			sesh.Clean = true
+		case "--repack":
+			sesh.Repack = true
 		case "--force":
 			sesh.Force = true
 		case "--cli":
@@ -183,6 +236,12 @@ func parseArgs(args []string) ([]string, int) {
 		sesh.CLI = false
 	default:
 		sesh.CLI = !isatty.IsTerminal(os.Stdout.Fd()) && !isatty.IsCygwinTerminal(os.Stdout.Fd())
+	}
+
+	// Both throw away the layout along with the output they delete, so there
+	// is nothing left to honour.
+	if sesh.Clean || sesh.Nuke {
+		sesh.Repack = true
 	}
 
 	if sesh.Nuke && sesh.All {
@@ -276,6 +335,7 @@ func run() int {
 
 	// Handle --nuke: confirm, then remove the output folder
 	if sesh.Nuke {
+		note("Deleting the output tree loses the Godot uids stored in it. Godot will mint new ones on the next import, and scenes referencing those resources by uid will need re-saving.")
 		ok, code := confirmOrFail(fmt.Sprintf("This will delete everything in %s. Are you sure?", prj.Destination))
 		if code != 0 {
 			return code
@@ -339,6 +399,11 @@ func run() int {
 	if aborted {
 		fmt.Fprintln(os.Stderr, "Interrupted.")
 		return 130
+	}
+
+	reportRenames()
+	if code := handleOrphans(); code != 0 {
+		return code
 	}
 
 	if !sesh.CLI {

@@ -83,16 +83,16 @@ func filterDirty(all []folder) (kept []folder, images int, skipped int) {
 		runDigests[f.path] = folderDigest(f)
 	}
 
+	priorManifest = loadManifest()
+
 	if sesh.All || sesh.Nuke {
 		return all, countImages(all), 0
 	}
 
-	mf := loadManifest()
 	globals := globalsDigest()
 
-	dirty := map[string]bool{}
 	for _, f := range all {
-		entry, known := mf.Folders[f.path]
+		entry, known := priorManifest.Folders[f.path]
 
 		// A manifest can outlive the output it describes.
 		outputMissing := false
@@ -100,43 +100,30 @@ func filterDirty(all []folder) (kept []folder, images int, skipped int) {
 			outputMissing = true
 		}
 
-		if !known || entry.Digest != runDigests[f.path] || mf.Globals != globals || outputMissing {
-			dirty[f.path] = true
-		}
-	}
-
-	expandCharSiblings(all, dirty)
-
-	for _, f := range all {
-		if dirty[f.path] {
+		if !known || entry.Digest != runDigests[f.path] || priorManifest.Globals != globals ||
+			outputMissing || outputsIncomplete(f.path, entry) {
 			kept = append(kept, f)
 		}
 	}
+
 	return kept, countImages(kept), len(all) - len(kept)
 }
 
-// Character animations share a {char}_frames.tres written from whichever packs
-// are in the work queue, so a rebuilt character folder has to drag its siblings
-// along or the others drop out of the resource.
-func expandCharSiblings(all []folder, dirty map[string]bool) {
-	parents := map[string]bool{}
-
-	for _, f := range all {
-		if dirty[f.path] && f.config.typ == FolderTypeCharacter {
-			parents[filepath.Dir(f.path)] = true
-		}
-	}
-	for _, pruned := range sesh.Pruned {
-		if getFolderConfig(pruned).typ == FolderTypeCharacter {
-			parents[filepath.Dir(pruned)] = true
-		}
+// The manifest is load-bearing for correctness now, not just for speed:
+// {char}_frames.tres is built from it, so a record pointing at a .tres that is
+// no longer on disk has to rebuild the folder rather than emit a dangling path.
+func outputsIncomplete(folderPath string, entry folderEntry) bool {
+	if len(entry.Files) == 0 {
+		return false
 	}
 
-	for _, f := range all {
-		if f.config.typ == FolderTypeCharacter && parents[filepath.Dir(f.path)] {
-			dirty[f.path] = true
+	dir := filepath.Join(prj.Destination, folderPath)
+	for _, name := range manifestSpriteNames(folderPath, getFolderConfig(folderPath), entry) {
+		if _, err := os.Stat(filepath.Join(dir, name+".tres")); err != nil {
+			return true
 		}
 	}
+	return false
 }
 
 func countImages(folders []folder) int {
@@ -152,10 +139,14 @@ func countImages(folders []folder) int {
 // the whole run.
 func buildManifest(built []folder, work []workPiece, exceptions []exception) (manifest, bool) {
 	slices := map[string][]sliceEntry{}
+	packs := map[string]workPack{}
 	for _, w := range work {
-		if ws, ok := w.(workSlice); ok {
-			src := strings.TrimSuffix(ws.file.filename, filepath.Ext(ws.file.filename))
-			slices[ws.f.path] = append(slices[ws.f.path], sliceEntry{Dir: ws.file.baseName(), Src: src})
+		switch v := w.(type) {
+		case workSlice:
+			src := strings.TrimSuffix(v.file.filename, filepath.Ext(v.file.filename))
+			slices[v.f.path] = append(slices[v.f.path], sliceEntry{Dir: v.file.baseName(), Src: src})
+		case workPack:
+			packs[v.f.path] = v
 		}
 	}
 
@@ -182,8 +173,57 @@ func buildManifest(built []folder, work []workPiece, exceptions []exception) (ma
 		}
 		entries := slices[f.path]
 		sort.Slice(entries, func(i, j int) bool { return entries[i].Dir < entries[j].Dir })
-		mf.Folders[f.path] = folderEntry{Digest: runDigests[f.path], Slices: entries}
+
+		entry := folderEntry{Digest: runDigests[f.path], Slices: entries}
+		if wp, ok := packs[f.path]; ok {
+			entry.Bins = len(wp.bins)
+			entry.Files = placementRecords(wp)
+		}
+		mf.Folders[f.path] = entry
 	}
 
 	return mf, true
+}
+
+// Where every piece of every packed source file landed, so the next run can
+// honour the same slots instead of reflowing the sheet around a single edit.
+func placementRecords(wp workPack) []fileRecord {
+	placed := make([]piecePlacement, len(wp.files))
+	found := make([]bool, len(wp.files))
+
+	for bi, bin := range wp.bins {
+		for _, sr := range bin.rects {
+			if sr.i < 0 || sr.i >= len(wp.files) {
+				continue
+			}
+			placed[sr.i] = piecePlacement{
+				Name: wp.files[sr.i].outName,
+				Bin:  bi,
+				X:    sr.x, Y: sr.y, W: sr.w, H: sr.h,
+			}
+			found[sr.i] = true
+		}
+	}
+
+	byFile := map[string]*fileRecord{}
+	names := []string{}
+	for i, f := range wp.files {
+		if !found[i] {
+			continue
+		}
+		rec, ok := byFile[f.filename]
+		if !ok {
+			rec = &fileRecord{File: f.filename, Hash: f.hash}
+			byFile[f.filename] = rec
+			names = append(names, f.filename)
+		}
+		rec.Pieces = append(rec.Pieces, placed[i])
+	}
+
+	sort.Strings(names)
+	out := make([]fileRecord, 0, len(names))
+	for _, n := range names {
+		out = append(out, *byFile[n])
+	}
+	return out
 }

@@ -25,15 +25,24 @@ type packWorkUpdateMsg struct {
 	id    int
 	phase packPhase
 	bins  []spriteBin
+	hint  string // non-empty when this folder is worth --repack
 }
 
 func pack(w workPack) {
+	if len(w.files) == 0 {
+		return
+	}
 
-	// First, calc the bins using maxrect.
 	// TODO: Use the other algos for different types of source art
-	bins := maxRects(w.files, AlgoBSSF)
-	prg.Send(packWorkUpdateMsg{id: w.id, phase: printing, bins: bins})
-	errs := renderBins(bins, w.files)
+	bins, incremental := packFolder(w)
+
+	hint := ""
+	if incremental {
+		hint = repackHint(w, bins)
+	}
+
+	prg.Send(packWorkUpdateMsg{id: w.id, phase: printing, bins: bins, hint: hint})
+	errs := renderBins(bins, w.files, w.files[0].targetFolderPath())
 	for _, err := range errs {
 		prg.Send(toException(err, nil))
 	}
@@ -65,75 +74,67 @@ func maxRects(files []imageFile, algo MaxRectsAlgo) []spriteBin {
 			continue
 		}
 
-		placed := false
-
-		// Try each existing bin until we find one that fits.
-		// Rule is that we are trying to pack our spritesheets as full
-		// as possible, which will make the packer slower but in theory
-		// will save vram in game.
-		for bi := range bins {
-			bestScore := math.MaxInt
-			bestIdx := -1
-
-			// For each free rect:
-			for fi, fr := range bins[bi].freeRects {
-				// Does it fit?
-				if spriteW > fr.w || spriteH > fr.h {
-					continue
-				}
-
-				// Get the score with the selected algo
-				score := scoreRect(fr, spriteW, spriteH, algo)
-				if score < bestScore {
-					bestScore = score
-					bestIdx = fi
-				}
-			}
-
-			// Found a suitable free rect in this bin
-			if bestIdx >= 0 {
-				fr := bins[bi].freeRects[bestIdx]
-
-				// Place sprite at the bottom-left corner of the chosen free rect
-				sprite := spriteRect{
-					rect: rect{
-						x: fr.x,
-						y: fr.y,
-						w: spriteW,
-						h: spriteH,
-					},
-					i: i,
-				}
-				bins[bi].rects = append(bins[bi].rects, sprite)
-
-				// Split free rects and remove the used one
-				bins[bi].freeRects = splitFreeRects(bins[bi].freeRects, sprite)
-
-				placed = true
-				break
-			}
-		}
-
-		// No existing bin could fit this sprite - create a new bin
-		if !placed {
-			newBin := spriteBin{
-				freeRects: []rect{{w: prj.SpritesheetSize, h: prj.SpritesheetSize}},
-			}
-			sprite := spriteRect{
-				rect: rect{
-					x: 0,
-					y: 0,
-					w: spriteW,
-					h: spriteH,
-				},
-				i: i,
-			}
-			newBin.rects = append(newBin.rects, sprite)
-			newBin.freeRects = splitFreeRects(newBin.freeRects, sprite)
-			bins = append(bins, newBin)
-		}
+		bins = placeSprite(bins, i, spriteW, spriteH, algo)
 	}
 	return bins
+}
+
+// Places one sprite into the first bin with room for it, appending a bin when
+// none has any. Shared with incremental packing, where most sprites are
+// already seated and only the new and resized ones come through here.
+func placeSprite(bins []spriteBin, i, spriteW, spriteH int, algo MaxRectsAlgo) []spriteBin {
+	// Try each existing bin until we find one that fits.
+	// Rule is that we are trying to pack our spritesheets as full
+	// as possible, which will make the packer slower but in theory
+	// will save vram in game.
+	for bi := range bins {
+		bestScore := math.MaxInt
+		bestIdx := -1
+
+		// For each free rect:
+		for fi, fr := range bins[bi].freeRects {
+			// Does it fit?
+			if spriteW > fr.w || spriteH > fr.h {
+				continue
+			}
+
+			// Get the score with the selected algo
+			score := scoreRect(fr, spriteW, spriteH, algo)
+			if score < bestScore {
+				bestScore = score
+				bestIdx = fi
+			}
+		}
+
+		if bestIdx < 0 {
+			continue
+		}
+
+		fr := bins[bi].freeRects[bestIdx]
+
+		// Place sprite at the bottom-left corner of the chosen free rect
+		sprite := spriteRect{
+			rect: rect{x: fr.x, y: fr.y, w: spriteW, h: spriteH},
+			i:    i,
+		}
+		bins[bi].rects = append(bins[bi].rects, sprite)
+
+		// Split free rects and remove the used one
+		bins[bi].freeRects = splitFreeRects(bins[bi].freeRects, sprite)
+		return bins
+	}
+
+	// No existing bin could fit this sprite - create a new bin
+	newBin := spriteBin{
+		freeRects: []rect{{w: prj.SpritesheetSize, h: prj.SpritesheetSize}},
+	}
+	sprite := spriteRect{
+		rect: rect{x: 0, y: 0, w: spriteW, h: spriteH},
+		i:    i,
+	}
+	newBin.rects = append(newBin.rects, sprite)
+	newBin.freeRects = splitFreeRects(newBin.freeRects, sprite)
+	return append(bins, newBin)
 }
 
 // scoreRect returns a score for placing a sprite in a free rect.

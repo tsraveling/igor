@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/progress"
@@ -85,6 +86,7 @@ type processModel struct {
 	numWriteDone  int
 	writeCh       chan writeProgressMsg
 	manifestNote  string
+	repackHints   []string
 	aborted       bool
 }
 
@@ -197,6 +199,9 @@ func (m processModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if detailOn() {
 			emitDetail(processing, "%s: printing %s", activeWorkName(m.activeWork, msg.id), plural(len(msg.bins), "bin"))
 		}
+		if msg.hint != "" {
+			m.repackHints = append(m.repackHints, msg.hint)
+		}
 		for i := range m.activeWork {
 			if m.activeWork[i].ID() == msg.id {
 				wp := m.activeWork[i].(workPack)
@@ -238,13 +243,28 @@ func (m processModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.phase = done
 			return m, tea.Quit
 		}
+		// Never auto-repack. Fragmentation is named and left to the human,
+		// because silent reflow is the surprise all of this exists to remove.
+		sort.Strings(m.repackHints)
+		for _, h := range m.repackHints {
+			emitWarning(h)
+		}
+
 		m.phase = writing
 		emitPhase(writing, "%s", plural(len(m.finishedWork), "resource"))
 		m.numWriteTotal = len(m.finishedWork)
 		m.numWriteDone = 0
 		ch := make(chan writeProgressMsg)
 		m.writeCh = ch
-		return m, tea.Batch(startWriting(slices.Clone(m.finishedWork), ch), waitForWriteProgress(ch))
+
+		// The writers need this run's results, since {char}_frames.tres is
+		// built from the manifest rather than from the work queue. It is built
+		// again after writing, to fold in any write-time exceptions.
+		mf, ok := buildManifest(m.folders, m.finishedWork, m.exceptions)
+		if !ok {
+			mf = loadManifest()
+		}
+		return m, tea.Batch(startWriting(slices.Clone(m.finishedWork), mf, ch), waitForWriteProgress(ch))
 
 	case writeProgressMsg:
 		m.numWriteDone = msg.done
@@ -254,6 +274,7 @@ func (m processModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case writingCompleteMsg:
 		m.phase = done
 		if mf, ok := buildManifest(m.folders, m.finishedWork, m.exceptions); ok {
+			scanOrphans(mf)
 			if err := mf.save(); err != nil {
 				// An unwritten cache makes the next run rebuild everything, so
 				// it fails the run rather than just printing a note.
@@ -412,6 +433,17 @@ func (m processModel) getWorkingOutput() string {
 			b.WriteString(fmt.Sprintf("\n%d unchanged folders skipped", skipped))
 		}
 
+		b.WriteString(fmt.Sprintf("\n%s written, %d unchanged",
+			plural(int(sesh.FilesWritten.Load()), "file"), sesh.FilesUnchanged.Load()))
+
+		if len(m.repackHints) > 0 {
+			hintStyle := lipgloss.NewStyle().Foreground(warningColor)
+			b.WriteString("\n")
+			for _, h := range m.repackHints {
+				b.WriteString("\n" + hintStyle.Render(h))
+			}
+		}
+
 		if m.manifestNote != "" {
 			warnStyle := lipgloss.NewStyle().Foreground(warningColor).Bold(true)
 			b.WriteString("\n" + warnStyle.Render(m.manifestNote))
@@ -527,16 +559,10 @@ func workResultLine(w workPiece) string {
 	return "finished work"
 }
 
+// Counts what hit disk rather than what was rebuilt. Most runs now write
+// nothing, so a line reporting work done would be actively misleading.
 func (m processModel) summaryLine() string {
-	packed, sliced := 0, 0
-	for _, w := range m.finishedWork {
-		switch w.(type) {
-		case workPack:
-			packed++
-		case workSlice:
-			sliced++
-		}
-	}
-	return fmt.Sprintf("%s, %d packed, %d sliced, %d skipped, %s",
-		plural(len(m.folders), "folder"), packed, sliced, sesh.FoldersSkipped.Load(), plural(len(m.exceptions), "error"))
+	return fmt.Sprintf("%s, %s written, %d unchanged, %d folders skipped, %s",
+		plural(len(m.folders), "folder"), plural(int(sesh.FilesWritten.Load()), "file"),
+		sesh.FilesUnchanged.Load(), sesh.FoldersSkipped.Load(), plural(len(m.exceptions), "error"))
 }

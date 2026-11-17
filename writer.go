@@ -10,7 +10,7 @@ import (
 
 type writingCompleteMsg struct{}
 
-func startWriting(work []workPiece, ch chan writeProgressMsg) tea.Cmd {
+func startWriting(work []workPiece, mf manifest, ch chan writeProgressMsg) tea.Cmd {
 	return func() tea.Msg {
 		total := len(work)
 		var done atomic.Int32
@@ -42,17 +42,22 @@ func startWriting(work []workPiece, ch chan writeProgressMsg) tea.Cmd {
 
 		wg.Wait()
 
-		// Generate SpriteFrames for character folders
-		charGroups := map[string][]workPack{}
+		// Generate SpriteFrames for every character touched this run. The
+		// contents come from the manifest, so a rebuilt animation no longer
+		// has to drag its siblings into the work queue to stay in the file.
+		charParents := map[string]bool{}
 		for _, w := range work {
 			if wp, ok := w.(workPack); ok && wp.f.config.typ == FolderTypeCharacter {
-				parentPath := filepath.Dir(wp.f.path)
-				charGroups[parentPath] = append(charGroups[parentPath], wp)
+				charParents[filepath.Dir(wp.f.path)] = true
 			}
 		}
-		for parentPath, packs := range charGroups {
-			charName := filepath.Base(parentPath)
-			writeSpriteFrames(charName, parentPath, packs)
+		for _, pruned := range sesh.Pruned {
+			if getFolderConfig(pruned).typ == FolderTypeCharacter {
+				charParents[filepath.Dir(pruned)] = true
+			}
+		}
+		for parentPath := range charParents {
+			writeSpriteFrames(filepath.Base(parentPath), parentPath, mf)
 		}
 
 		// Generate reassembly .tscn for env folders

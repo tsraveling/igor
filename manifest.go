@@ -11,13 +11,20 @@ import (
 )
 
 // Bump when writer output format changes, to invalidate every cached digest.
-const manifestFormatVersion = 1
+const manifestFormatVersion = 2
 
 const manifestFilename = ".igor-cache.json"
 
+// One sliced output directory. Dir is what landed on disk, Src the source PNG
+// it came from, which differ once divideAbove splits one PNG into several.
+type sliceEntry struct {
+	Dir string `json:"dir"`
+	Src string `json:"src"`
+}
+
 type folderEntry struct {
-	Digest string   `json:"digest"`
-	Slices []string `json:"slices,omitempty"`
+	Digest string       `json:"digest"`
+	Slices []sliceEntry `json:"slices,omitempty"`
 }
 
 type manifest struct {
@@ -89,7 +96,8 @@ func folderDigest(f folder) string {
 	sort.Strings(lines)
 
 	h := sha256.New()
-	fmt.Fprintf(h, "cfg:%s|%t|%t\n", f.config.typ, f.config.renameLayers, f.config.includeCharName)
+	fmt.Fprintf(h, "cfg:%s|%t|%t|%d|%d\n", f.config.typ, f.config.renameLayers, f.config.includeCharName,
+		f.config.divideAbove, f.config.alphaThreshold)
 	for _, l := range lines {
 		fmt.Fprintf(h, "%s\n", l)
 	}

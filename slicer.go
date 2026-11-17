@@ -7,7 +7,6 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 type sliceWorkUpdateMsg struct {
@@ -23,7 +22,7 @@ func slice(w workSlice) {
 	}
 
 	// Build output directory: {DEST}/{path}/{basename}/
-	basename := strings.TrimSuffix(w.file.filename, filepath.Ext(w.file.filename))
+	basename := w.file.baseName()
 	outDir := filepath.Join(prj.Destination, w.file.path, basename)
 	if err := os.MkdirAll(outDir, 0755); err != nil {
 		prg.Send(toException(err, &w.file))

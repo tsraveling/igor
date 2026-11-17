@@ -57,10 +57,10 @@ func writeTres(wp workPack) {
 
 		for _, sr := range bin.rects {
 			img := wp.files[sr.i]
-			sName := spriteName(wp.f.config, img.filename, wp.f.name, charName, sortedIndex[sr.i])
+			sName := spriteName(wp.f.config, img, wp.f.name, charName, sortedIndex[sr.i])
 			tresPath := filepath.Join(trgFolder, sName+".tres")
 
-			content := buildTres(resPath, sr, img)
+			content := buildTres(resPath, sr, img, wp.f.config.typ != FolderTypeItem)
 			if err := os.WriteFile(tresPath, []byte(content), 0644); err != nil {
 				prg.Send(toException(err, &img))
 			}
@@ -68,8 +68,12 @@ func writeTres(wp workPack) {
 	}
 }
 
-func spriteName(cfg folderConfig, filename string, folderName string, charName string, alphaIndex int) string {
-	name := strings.TrimSuffix(filename, filepath.Ext(filename))
+func spriteName(cfg folderConfig, img imageFile, folderName string, charName string, alphaIndex int) string {
+	// A divided piece already carries its reading-order name.
+	if img.outName != "" {
+		return img.outName
+	}
+	name := img.baseName()
 	if cfg.renameLayers {
 		prefix := folderName
 		if cfg.includeCharName {
@@ -115,7 +119,7 @@ func writeSpriteFrames(charName string, parentPath string, packs []workPack) {
 		animName := wp.f.name
 
 		for fi, img := range files {
-			sName := spriteName(wp.f.config, img.filename, wp.f.name, charName, fi+1)
+			sName := spriteName(wp.f.config, img, wp.f.name, charName, fi+1)
 			tresRelPath := filepath.Join(img.path, sName+".tres")
 			resPath := prj.resPath(tresRelPath)
 			id := fmt.Sprintf("%d_%s", counter, generateRandomID(5))
@@ -181,7 +185,7 @@ func writeSpriteFrames(charName string, parentPath string, packs []workPack) {
 	}
 }
 
-func buildTres(pngResPath string, sr spriteRect, img imageFile) string {
+func buildTres(pngResPath string, sr spriteRect, img imageFile, withMargin bool) string {
 	var b strings.Builder
 
 	b.WriteString("[gd_resource type=\"AtlasTexture\" load_steps=2 format=3]\n\n")
@@ -189,6 +193,12 @@ func buildTres(pngResPath string, sr spriteRect, img imageFile) string {
 	b.WriteString("[resource]\n")
 	b.WriteString("atlas = ExtResource(\"1\")\n")
 	b.WriteString(fmt.Sprintf("region = Rect2(%d, %d, %d, %d)\n", sr.x, sr.y, sr.w, sr.h))
+
+	// Item textures stand alone rather than reassembling into a scene, so they
+	// keep no record of where they sat on the source canvas.
+	if !withMargin {
+		return b.String()
+	}
 
 	// Only include margin if there's actual padding.
 	// Godot's margin is Rect2(left_offset, top_offset, total_width_expansion, total_height_expansion)

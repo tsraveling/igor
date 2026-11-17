@@ -79,6 +79,16 @@ func emitException(exc exception) {
 	fmt.Fprintln(os.Stderr, line)
 }
 
+// A non-fatal notice, routed to whichever surface the run has: the TUI log
+// box, or stderr in CLI mode.
+func warn(msg string) {
+	if sesh.CLI {
+		emitWarning(msg)
+		return
+	}
+	prg.Send(logMsg{"WARN: " + msg})
+}
+
 // Non-fatal warnings share stderr with exceptions, since neither belongs in a
 // piped build log's stdout.
 func emitWarning(msg string) {

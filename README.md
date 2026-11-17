@@ -108,6 +108,46 @@ You'll get
      
 ```
 
+#### Item
+
+`mode: item` is for folders of loose props that never reassemble into anything. Unlike char and env there are no margins and no scene: each image is trimmed, packed into the folder's spritesheet, and handed back as a plain texture that draws at its own origin.
+
+```
+"items/**": { mode: item }
+```
+
+So a folder of six PNGs exported off a PSD, each sitting in a huge mostly-empty canvas, becomes one spritesheet and six `.tres` textures with the canvas offsets thrown away.
+
+An item larger than `slice-size` is grid-sliced like any other oversized image and gets its own `.tscn`, which is what you want for a big but atomic prop such as a ship or a house.
+
+#### divideAbove
+
+A single PNG often holds several separate things. `divideAbove` cuts them apart:
+
+```
+"items/**": { mode: item, divideAbove: 16 }
+```
+
+Any cluster of pixels separated from every other cluster by at least that many transparent pixels becomes its own item. The value is the **minimum gap between neighbouring items**, so tune it to the tightest spacing in your art: generous for painted work, small for pixel art. Too high and neighbours fuse into one item; too low and a single object fragments.
+
+Clusters are found by true nearest-pixel distance rather than by rows and columns, so items scattered in a cloud divide just as well as items laid out on a grid.
+
+Pieces are named in reading order, `<source>_01`, `_02`, and so on, where a row is every piece whose vertical span overlaps the topmost piece not yet placed, read left to right. A source image that turns out to hold only one item keeps its own name with no suffix.
+
+In `item` mode the pieces become separate textures and nothing records where they sat. In `env` and `simple` mode they are packed small and then re-added to the scene at their original positions, so a PNG of six balcony plants becomes six sprites that still line up with the rest of the building. Character mode ignores `divideAbove` and warns, since an animation frame has to stay whole.
+
+Pieces smaller than 8x8 are kept but warned about, since they are usually export noise rather than something you drew.
+
+#### alphaThreshold
+
+Soft brushes and PSD exports leave a tail of nearly invisible pixels behind. A stray pixel at alpha 1 sitting between two items is enough to weld them into one, so `alphaThreshold` sets the alpha a pixel has to exceed before `divideAbove` counts it:
+
+```
+"items/**": { mode: item, divideAbove: 16, alphaThreshold: 4 }
+```
+
+It defaults to `0`, meaning any pixel above fully transparent counts. Raise it when items that are clearly apart in the source keep merging. It applies only to division, never to the ordinary trimming pass.
+
 #### Coming Soon ...
 
 - Grid tilesets: draw your frames in a specific configuration and Igor will automatically build a tileable spritesheet for you with all the resources

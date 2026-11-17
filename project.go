@@ -30,6 +30,8 @@ type ruleConfig struct {
 	Mode            string `yaml:"mode"`
 	RenameLayers    bool   `yaml:"renameLayers"`
 	IncludeCharName bool   `yaml:"includeCharName"`
+	DivideAbove     int    `yaml:"divideAbove"`
+	AlphaThreshold  int    `yaml:"alphaThreshold"`
 }
 
 func loadProject(folder string) error {

@@ -345,6 +345,8 @@ func (m processModel) getWorkingOutput() string {
 				t = "char"
 			case FolderTypeEnv:
 				t = "env"
+			case FolderTypeItem:
+				t = "item"
 			case FolderTypeStandard:
 				t = "standard"
 			}
@@ -492,6 +494,8 @@ func folderTypeName(t folderType) string {
 		return "char"
 	case FolderTypeEnv:
 		return "env"
+	case FolderTypeItem:
+		return "item"
 	default:
 		return "standard"
 	}

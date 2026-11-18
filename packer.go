@@ -42,7 +42,9 @@ func pack(w workPack) {
 	}
 
 	prg.Send(packWorkUpdateMsg{id: w.id, phase: printing, bins: bins, hint: hint})
-	errs := renderBins(bins, w.files, w.files[0].targetFolderPath())
+	// How many sheets the last build left here, so cleanup only reclaims what
+	// igor knows it wrote.
+	errs := renderBins(bins, w.files, w.files[0].targetFolderPath(), priorManifest.Folders[w.f.path].Bins)
 	for _, err := range errs {
 		prg.Send(toException(err, nil))
 	}

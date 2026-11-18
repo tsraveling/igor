@@ -15,7 +15,8 @@ import (
 // way from scratch never nags.
 const repackGainThreshold = 0.35
 
-// Guards against a corrupt manifest asking for a preposterous number of bins.
+// Sanity ceiling on a sheet index recovered from a manifest or a .tres, so a
+// corrupt or hand-edited one cannot ask for an absurd number of bins.
 const maxLayoutBins = 1024
 
 // One placed piece. Output names move under renameLayers, so the slot a sprite
@@ -82,7 +83,7 @@ func binIndexOf(resPath, folderName string) (int, bool) {
 		return 0, false
 	}
 	n, err := strconv.Atoi(m[1])
-	if err != nil || n < 0 || n > maxLayoutBins {
+	if err != nil || n < 0 || n >= maxLayoutBins {
 		return 0, false
 	}
 	return n, true
@@ -154,7 +155,13 @@ func repackAround(files []imageFile, slots map[slotKey]piecePlacement) ([]sprite
 		if !ok || p.W != f.trim.w || p.H != f.trim.h {
 			continue
 		}
-		if p.X < 0 || p.Y < 0 || p.Bin < 0 || p.Bin > maxLayoutBins {
+		// Only a sanity bound. Tying this to the number of files or recovered
+		// slots rejects real slots: deleting the sprites on the early sheets
+		// leaves the survivors sitting on legitimately high bins, and an
+		// unreadable .tres shrinks the recovered set without shrinking the
+		// layout. An over-large index now costs nothing anyway, since an empty
+		// bin renders no sheet.
+		if p.X < 0 || p.Y < 0 || p.Bin < 0 || p.Bin >= maxLayoutBins {
 			continue
 		}
 		if p.X+p.W > prj.SpritesheetSize || p.Y+p.H > prj.SpritesheetSize {
@@ -238,10 +245,12 @@ func binArea(bins []spriteBin) int {
 }
 
 // The power-of-two sheet a bin renders to, halved down from the project size
-// while the sprites still fit.
+// while the sprites still fit. The comparison is >=, because content whose
+// extent is exactly half a sheet fits that half exactly; > left it on the
+// larger size, costing four times the texture memory at every power of two.
 func sheetDim(extent int) int {
 	d := prj.SpritesheetSize
-	for d/2 > extent {
+	for d > 1 && d/2 >= extent {
 		d /= 2
 	}
 	return d
@@ -252,18 +261,47 @@ func sheetDim(extent int) int {
 // compares against one rather than guessing from waste alone. Never automatic:
 // silent reflow is the surprise this whole feature exists to remove.
 func repackHint(w workPack, bins []spriteBin) string {
-	fresh := maxRects(w.files, AlgoBSSF)
+	fresh := maxRects(measurable(w.files), AlgoBSSF)
 	cur, gain := binArea(bins), binArea(fresh)
-	if len(fresh) >= len(bins) && float64(gain) > float64(cur)*(1-repackGainThreshold) {
+
+	// An empty interior bin keeps its index but renders no sheet, so counting
+	// the slice would both overstate what is on disk and let a folder skip the
+	// threshold on a bin count it does not really have.
+	occupied := 0
+	for _, b := range bins {
+		if len(b.rects) > 0 {
+			occupied++
+		}
+	}
+
+	// Fewer bins can still cost more area, and recommending that would be
+	// advice to make things worse.
+	if gain >= cur {
+		return ""
+	}
+	if len(fresh) >= occupied && float64(gain) > float64(cur)*(1-repackGainThreshold) {
 		return ""
 	}
 
-	saved := 0
-	if cur > 0 {
-		saved = int(100 * float64(cur-gain) / float64(cur))
+	saved := int(100 * float64(cur-gain) / float64(cur))
+	if saved < 1 {
+		return ""
 	}
 	return fmt.Sprintf("%s: --repack would save %d%% of its sheet area (%s now, %s packed fresh)",
-		w.f.path, saved, plural(len(bins), "bin"), plural(len(fresh), "bin"))
+		w.f.path, saved, plural(occupied, "bin"), plural(len(fresh), "bin"))
+}
+
+// maxRects reports an oversized sprite as it walks the list, and the pack this
+// is measuring against has already done that, so a second pass must not hand
+// the same file over twice.
+func measurable(files []imageFile) []imageFile {
+	out := make([]imageFile, 0, len(files))
+	for _, f := range files {
+		if f.trim.w <= prj.SpritesheetSize && f.trim.h <= prj.SpritesheetSize {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 // 1-based alphabetical position of each file, for renameLayers. A nil map

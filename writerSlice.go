@@ -17,6 +17,11 @@ func writeSliceTscn(ws workSlice) {
 	trim := ws.file.trim
 
 	old := readGodotFile(tscnPath)
+	if old == nil {
+		// Nothing to carry, so the env scene referencing this one must not
+		// keep declaring a uid it no longer has.
+		sesh.markIdentityReset(prj.resPath(filepath.Join(ws.file.path, basename, basename+".tscn")))
+	}
 
 	resPaths := make([]string, len(ws.slices))
 	for i, s := range ws.slices {

@@ -19,6 +19,18 @@ slice-size: 1024
 rules:
 ```
 
+### Rule precedence
+
+More than one rule can match the same folder. The most specific one wins, so a rule naming a subfolder overrides one covering the tree above it:
+
+```
+rules:
+  "chars/**": { mode: character, renameLayers: true }
+  "chars/hero/props": { mode: item }
+```
+
+Specificity is decided by fewest wildcards first, then most path segments, then the longer pattern, with ties broken alphabetically so the result never depends on map ordering.
+
 ### Modes
 
 #### Simple
@@ -188,7 +200,7 @@ Adding or changing an image produces diff only for that image and the things tha
 
 Igor also keeps Godot's identity across rebuilds. It reads the `uid://` and the `ext_resource` ids out of the file it is about to overwrite and re-attaches them, so references from your scenes survive a rebuild. `--clean` and `--nuke` delete the output tree and lose those uids with it; Godot mints new ones on the next import.
 
-Incremental placement leaves holes behind over time. Igor never compacts a sheet on its own — a silent reflow is the thing all of this exists to prevent — but it will name folders where a fresh pack would do meaningfully better. `--repack` ignores the stored layout for the folders that run touches, and `--clean` and `--nuke` imply it.
+Incremental placement leaves holes behind over time. Igor never compacts a sheet on its own — a silent reflow is the thing all of this exists to prevent — but it will name folders where a fresh pack would do meaningfully better. `--repack` ignores the stored layout and repacks every folder; `--nuke` implies it, since it deletes the layout along with the output. `--clean` does not: the folders it leaves standing keep theirs.
 
 One case cannot hold the line. Under `renameLayers`, output is named by alphabetical position, so inserting a frame into the *middle* of an animation renames every later one. Those are new resources with new uids, and any scene pointing at the old names will break. Igor prints the full rename list when it happens rather than letting it pass quietly.
 

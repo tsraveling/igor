@@ -104,9 +104,12 @@ func readGodotFile(path string) *godotFile {
 }
 
 // Reuses the previous header so its uid survives. Godot and igor disagree on
-// load_steps for the same AtlasTexture, and reusing the line verbatim settles
-// that without modelling Godot's rule; a gd_scene's load_steps does go stale
-// when the layer count moves, so that one number is patched in place.
+// whether an AtlasTexture carries load_steps at all, and reusing the line as
+// it stands settles that without modelling Godot's rule. Where the old header
+// does carry a load_steps, the number is patched to this write's count, since
+// it goes stale as soon as the resource count moves. igor rewrites these files
+// whole, so there is never a sub_resource of its own left for that count to
+// disagree with.
 func carryHeader(old *godotFile, kind, typ, want string, loadSteps int) string {
 	if old == nil || old.kind != kind {
 		return want
@@ -123,7 +126,7 @@ func carryHeader(old *godotFile, kind, typ, want string, loadSteps int) string {
 // Godot's field order is type, uid, path, id. A uid is re-attached only for
 // the same path it was read against: a wrong uid is worse than none.
 func extResourceLine(typ, resPath, id string, old *godotFile) string {
-	if old != nil {
+	if old != nil && !sesh.identityWasReset(resPath) {
 		if uid := old.uids[resPath]; uid != "" {
 			return fmt.Sprintf("[ext_resource type=%q uid=%q path=%q id=%q]\n", typ, uid, resPath, id)
 		}

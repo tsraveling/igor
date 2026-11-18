@@ -273,8 +273,21 @@ func (m processModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case writingCompleteMsg:
 		m.phase = done
-		if mf, ok := buildManifest(m.folders, m.finishedWork, m.exceptions); ok {
+		mf, ok := buildManifest(m.folders, m.finishedWork, m.exceptions)
+
+		// Orphans are found first, because one still pointing at a superseded
+		// sheet is what keeps that sheet from being reclaimed.
+		if ok {
 			scanOrphans(mf)
+		}
+
+		// Only a run that wrote everything it meant to may drop the sheets
+		// that packing superseded.
+		if len(m.exceptions) == 0 {
+			removeStaleSheets()
+		}
+
+		if ok {
 			if err := mf.save(); err != nil {
 				// An unwritten cache makes the next run rebuild everything, so
 				// it fails the run rather than just printing a note.

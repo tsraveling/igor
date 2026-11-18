@@ -40,9 +40,11 @@ type piecePlacement struct {
 
 // Keyed by source filename rather than output sprite name, because output
 // names shift under renameLayers and source filenames do not.
+//
+// No per-file hash: the folder Digest already covers every file's contents,
+// and this file is committed, so a field nothing reads is pure diff noise.
 type fileRecord struct {
 	File   string           `json:"file"`
-	Hash   string           `json:"hash"`
 	Pieces []piecePlacement `json:"pieces,omitempty"`
 }
 
@@ -51,6 +53,11 @@ type folderEntry struct {
 	Bins   int          `json:"bins,omitempty"`
 	Files  []fileRecord `json:"files,omitempty"`
 	Slices []sliceEntry `json:"slices,omitempty"`
+
+	// Sprites igor wrote on an earlier build and no longer writes. Carried
+	// until they are actually removed, so that --clean deletes only files it
+	// can show are its own rather than inferring provenance from their shape.
+	Orphans []string `json:"orphans,omitempty"`
 }
 
 type manifest struct {

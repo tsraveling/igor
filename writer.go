@@ -56,6 +56,9 @@ func startWriting(work []workPiece, mf manifest, ch chan writeProgressMsg) tea.C
 				charParents[filepath.Dir(pruned)] = true
 			}
 		}
+		for _, parent := range sesh.FramesDirty {
+			charParents[parent] = true
+		}
 		for parentPath := range charParents {
 			writeSpriteFrames(filepath.Base(parentPath), parentPath, mf)
 		}

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"io/fs"
 	"math/rand"
 	"os"
 	"os/signal"
@@ -65,6 +66,17 @@ func promptWriter() *os.File {
 	return os.Stderr
 }
 
+// One reader for the whole run. bufio fills its buffer on the first read, so a
+// second reader built for a later prompt finds the piped answers already gone.
+var stdinReader *bufio.Reader
+
+func stdin() *bufio.Reader {
+	if stdinReader == nil {
+		stdinReader = bufio.NewReader(os.Stdin)
+	}
+	return stdinReader
+}
+
 // Prompts unless --force was passed. A piped answer is fine; what is not fine
 // is no answer at all, since the caller asked for the work to happen and
 // silently skipping it would report success for work that never ran.
@@ -74,8 +86,7 @@ func confirmOrFail(question string) (bool, int) {
 	}
 
 	fmt.Fprintf(promptWriter(), "%s [y/N] ", question)
-	reader := bufio.NewReader(os.Stdin)
-	input, err := reader.ReadString('\n')
+	input, err := stdin().ReadString('\n')
 	if err != nil && input == "" {
 		fmt.Fprintln(promptWriter())
 		return false, fatal("Error: nothing to read on stdin, so %q went unanswered. Re-run on a terminal or pass --force.", question)
@@ -135,6 +146,18 @@ func handleStale() (bool, int) {
 	return true, 0
 }
 
+// The TUI renders its log box only while trimming, so a warning raised during
+// writing would never be seen. CLI mode has already printed these inline.
+func reportWarnings() {
+	warnings := sesh.takeWarnings()
+	if sesh.CLI || len(warnings) == 0 {
+		return
+	}
+	for _, w := range warnings {
+		note("WARNING: %s", w)
+	}
+}
+
 // renameLayers names by alphabetical position, so inserting a frame renames
 // every later one and breaks any scene that referenced it by uid. Nothing can
 // prevent that without a breaking change to naming, so it is said loudly.
@@ -158,12 +181,18 @@ func handleOrphans() int {
 		return 0
 	}
 
+	// Their sheets go with them, so say so rather than surprising anyone.
+	sheets := ""
+	if n := len(sesh.heldSheets()); n > 0 {
+		sheets = fmt.Sprintf(", along with %s left with nothing to draw", plural(n, "spritesheet"))
+	}
+
 	if !sesh.Clean {
-		note("%d orphaned .tres file(s) no longer have a sprite. Run with --clean to remove them.", len(orphans))
+		note("%d orphaned .tres file(s) no longer have a sprite%s. Run with --clean to remove them.", len(orphans), sheets)
 		return 0
 	}
 
-	note("These %d .tres file(s) no longer have a sprite:", len(orphans))
+	note("These %d .tres file(s) no longer have a sprite%s:", len(orphans), sheets)
 	for _, o := range orphans {
 		note("  %s", o)
 	}
@@ -176,13 +205,30 @@ func handleOrphans() int {
 		return 0
 	}
 
+	// The deletion is already confirmed, so one file that will not budge must
+	// not abandon the rest of it half done.
+	removed, failed := 0, 0
 	for _, o := range orphans {
 		if err := os.Remove(o); err != nil {
 			fmt.Fprintf(os.Stderr, "Error removing %s: %s\n", o, err.Error())
-			return 1
+			failed++
+			continue
+		}
+		removed++
+	}
+
+	// These were the only things still pointing at those sheets.
+	for _, sheet := range sesh.takeHeldSheets() {
+		if err := os.Remove(sheet); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			fmt.Fprintf(os.Stderr, "Error removing %s: %s\n", sheet, err.Error())
+			failed++
 		}
 	}
-	note("Removed %d orphaned .tres file(s).", len(orphans))
+
+	note("Removed %d of %d orphaned .tres file(s).", removed, len(orphans))
+	if failed > 0 {
+		return 1
+	}
 	return 0
 }
 
@@ -238,9 +284,10 @@ func parseArgs(args []string) ([]string, int) {
 		sesh.CLI = !isatty.IsTerminal(os.Stdout.Fd()) && !isatty.IsCygwinTerminal(os.Stdout.Fd())
 	}
 
-	// Both throw away the layout along with the output they delete, so there
-	// is nothing left to honour.
-	if sesh.Clean || sesh.Nuke {
+	// --nuke deletes the output tree, so there is no layout left to honour.
+	// --clean only removes paths whose source is gone; every surviving folder
+	// keeps its layout, and reflowing those would be the churn this avoids.
+	if sesh.Nuke {
 		sesh.Repack = true
 	}
 
@@ -401,6 +448,7 @@ func run() int {
 		return 130
 	}
 
+	reportWarnings()
 	reportRenames()
 	if code := handleOrphans(); code != 0 {
 		return code

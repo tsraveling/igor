@@ -22,8 +22,13 @@ func writeEnvTscn(folderPath string, packs []workPack, slices []workSlice) {
 
 	// Add packed sprites (small images → .tres referencing spritesheet)
 	for _, wp := range packs {
-		for _, img := range wp.files {
-			spriteName := img.baseName()
+		// The same naming writeTres used, or the scene references .tres paths
+		// that were never written.
+		sortedIndex := alphaIndexes(wp.files, wp.f.config.renameLayers)
+		charName := filepath.Base(filepath.Dir(wp.f.path))
+
+		for i, img := range wp.files {
+			spriteName := spriteName(wp.f.config, img, wp.f.name, charName, sortedIndex[i])
 			tresRelPath := filepath.Join(img.path, spriteName+".tres")
 			resPath := prj.resPath(tresRelPath)
 			layers = append(layers, envLayer{

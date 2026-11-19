@@ -69,6 +69,8 @@ func writeSliceTscn(ws workSlice) {
 		b.WriteString(fmt.Sprintf("texture = ExtResource(\"%s\")\n", id))
 	}
 
+	warnIfSceneHandEdited(tscnPath, b.String())
+
 	if _, err := writeIfChanged(tscnPath, []byte(b.String())); err != nil {
 		prg.Send(toException(err, &ws.file))
 	}

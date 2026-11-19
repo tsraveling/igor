@@ -72,6 +72,10 @@ func storedSlots(folderPath string) map[slotKey]piecePlacement {
 
 var binSuffixRe = regexp.MustCompile(`_(\d+)\.png$`)
 
+// A divided image's pieces are written as <source>_NN.tres, zero padded to at
+// least two digits, which keeps a sprite genuinely named "rocks_5" out of it.
+var pieceSuffixRe = regexp.MustCompile(`^(.*)_(\d{2,})\.tres$`)
+
 // Which sheet a .tres pointed at, from the spritesheet path it carried.
 func binIndexOf(resPath, folderName string) (int, bool) {
 	base := resBase(resPath)

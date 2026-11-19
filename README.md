@@ -198,6 +198,12 @@ Adding or changing an image produces diff only for that image and the things tha
 - Replacing one PNG in an environment package redraws that sprite's region on the sheet and leaves every sibling `.tres` alone.
 - A run over unchanged art writes nothing at all. Igor renders each file and compares it against what is already on disk, so a rebuilt folder that produces identical bytes never reaches `git status`.
 
+### The character frames resource is generated, not yours
+
+`{char}_frames.tres` is written from scratch on every run that touches the character, with one animation per folder, igor's default speed, and loop on. It is a SpriteFrames sitting in your project, so it is the obvious place to tune a speed or compose an animation out of frames that already exist -- and the next run will overwrite all of it.
+
+Keep the version you have tuned somewhere igor does not write, next to the scene that uses it, and copy across from the generated one when the frame lists change. Igor warns when the file it is about to overwrite looks hand edited: an animation whose name does not match a source folder, or a speed or loop it would not have written itself.
+
 Igor also keeps Godot's identity across rebuilds. It reads the `uid://` and the `ext_resource` ids out of the file it is about to overwrite and re-attaches them, so references from your scenes survive a rebuild. `--clean` and `--nuke` delete the output tree and lose those uids with it; Godot mints new ones on the next import.
 
 Incremental placement leaves holes behind over time. Igor never compacts a sheet on its own — a silent reflow is the thing all of this exists to prevent — but it will name folders where a fresh pack would do meaningfully better. `--repack` ignores the stored layout and repacks every folder; `--nuke` implies it, since it deletes the layout along with the output. `--clean` does not: the folders it leaves standing keep theirs.

@@ -115,6 +115,8 @@ func writeEnvTscn(folderPath string, packs []workPack, slices []workSlice) {
 		}
 	}
 
+	warnIfSceneHandEdited(outPath, b.String())
+
 	if _, err := writeIfChanged(outPath, []byte(b.String())); err != nil {
 		prg.Send(toException(err, nil))
 	}

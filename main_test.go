@@ -2484,3 +2484,255 @@ func TestFailedFolderKeepsItsSheetRecord(t *testing.T) {
 		t.Error("a failed folder must not be recorded as clean")
 	}
 }
+
+// The two positional naming schemes need different answers here, and the
+// difference is what a leftover actually tells you.
+//
+// Under renameLayers every frame is prefix_01..prefix_N, contiguous, so a
+// sprite on disk beyond that range only gets there by a frame being removed --
+// which shifts what every later name means. Dropping the uids is right, and
+// this pins that it still happens.
+func TestExtraSpritesUnderRenameLayersDropUIDs(t *testing.T) {
+	dir := projectWith(t, "  \"chars/**\": { mode: character, renameLayers: true }\n")
+	src := filepath.Join(dir, "in", "chars", "alice", "run")
+	for _, name := range []string{"a.png", "b.png", "c.png"} {
+		writePNG(t, filepath.Join(src, name), 16, 16)
+	}
+	out := filepath.Join(dir, "out")
+	mustRun(t, dir, "--cli")
+	stampUIDs(t, out)
+
+	second := filepath.Join(out, "chars", "alice", "run", "run_02.tres")
+	wasUID := uidOf(t, second)
+	if wasUID == "" {
+		t.Fatal("fixture never stamped a uid, so this proves nothing")
+	}
+
+	// a goes, so b slides onto run_01 and c onto run_02, and run_03 is left
+	// over. With no record there is no way to tell that from an old leftover.
+	if err := os.Remove(filepath.Join(src, "a.png")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(out, manifestFilename)); err != nil {
+		t.Fatal(err)
+	}
+
+	r := mustRun(t, dir, "--cli")
+	if got := uidOf(t, second); got == wasUID {
+		t.Errorf("run_02 means a different frame but kept uid %s", wasUID)
+	}
+	if !strings.Contains(r.stderr, "being reassigned") {
+		t.Errorf("the reassignment went unreported:\n%s", r.stderr)
+	}
+}
+
+// The same for divided images: a leftover belonging to one source image says
+// nothing about how another one is cut up.
+func TestStaleOrphanDoesNotCostDividedPiecesTheirUIDs(t *testing.T) {
+	dir := projectWith(t, "  \"items/**\": { mode: item, divideAbove: 10 }\n")
+	art := filepath.Join(dir, "in", "items", "props", "sheet.png")
+	writeBlocks(t, art, 120, 40, []block{
+		{x: 5, y: 5, w: 12, h: 12},
+		{x: 90, y: 5, w: 14, h: 14},
+	})
+	out := filepath.Join(dir, "out")
+	mustRun(t, dir, "--cli")
+	stampUIDs(t, out)
+
+	second := filepath.Join(out, "items", "props", "sheet_02.tres")
+	wasUID := uidOf(t, second)
+	if wasUID == "" {
+		t.Fatal("fixture never stamped a uid, so this proves nothing")
+	}
+
+	// Left over from a source image that no longer exists.
+	leftover := filepath.Join(out, "items", "props", "gone_03.tres")
+	if err := os.WriteFile(leftover, []byte(readFile(t, second)), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(out, manifestFilename)); err != nil {
+		t.Fatal(err)
+	}
+
+	mustRun(t, dir, "--cli")
+	if got := uidOf(t, second); got != wasUID {
+		t.Errorf("an unrelated orphan cost sheet_02 its uid: %q -> %q", wasUID, got)
+	}
+}
+
+// But a divided image whose own piece count changed still has to lose them,
+// with no build record to confirm it either way.
+func TestDividedPieceCountChangeWithoutCacheDropsUIDs(t *testing.T) {
+	dir := projectWith(t, "  \"items/**\": { mode: item, divideAbove: 10 }\n")
+	art := filepath.Join(dir, "in", "items", "props", "sheet.png")
+	writeBlocks(t, art, 120, 40, []block{
+		{x: 5, y: 5, w: 12, h: 12},
+		{x: 90, y: 5, w: 14, h: 14},
+	})
+	out := filepath.Join(dir, "out")
+	mustRun(t, dir, "--cli")
+	stampUIDs(t, out)
+
+	second := filepath.Join(out, "items", "props", "sheet_02.tres")
+	wasUID := uidOf(t, second)
+
+	if err := os.Remove(filepath.Join(out, manifestFilename)); err != nil {
+		t.Fatal(err)
+	}
+	writeBlocks(t, art, 120, 40, []block{
+		{x: 5, y: 5, w: 12, h: 12},
+		{x: 50, y: 5, w: 13, h: 13},
+		{x: 90, y: 5, w: 14, h: 14},
+	})
+	r := mustRun(t, dir, "--cli")
+
+	if got := uidOf(t, second); got == wasUID {
+		t.Errorf("sheet_02 describes a different blob but kept uid %s", wasUID)
+	}
+	if !strings.Contains(r.stderr, "being reassigned") {
+		t.Errorf("the reassignment went unreported:\n%s", r.stderr)
+	}
+}
+
+// The frames resource is igor's to rewrite, but it is a SpriteFrames sitting
+// in a Godot project, so it is the obvious place to tune a speed or compose an
+// animation from existing frames. Losing that silently is the worst outcome.
+func TestHandEditedFramesResourceIsWarnedAboutBeforeOverwrite(t *testing.T) {
+	dir := layoutFixture(t)
+	frames := filepath.Join(dir, "out", "chars", "alice", "alice_frames.tres")
+	mustRun(t, dir, "--cli")
+
+	body := readFile(t, frames)
+	if !strings.Contains(body, `"speed": 5.0`) {
+		t.Fatalf("fixture did not produce the expected defaults:\n%s", body)
+	}
+
+	// Tuned in the editor, and an animation composed out of jump's frames.
+	body = strings.Replace(body, `"speed": 5.0`, `"speed": 14.0`, 1)
+	body = strings.Replace(body, `"name": &"jump",`, `"name": &"jump-land",`, 1)
+	if err := os.WriteFile(frames, []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Something has to make the character dirty for the file to be rewritten.
+	writeBlocks(t, filepath.Join(dir, "in", "chars", "alice", "jump", "jump-02.png"),
+		16, 16, []block{{x: 2, y: 2, w: 10, h: 10}})
+	r := mustRun(t, dir, "--cli")
+
+	if !strings.Contains(r.stderr, "looks hand edited") {
+		t.Errorf("igor overwrote a hand-edited frames resource silently:\n%s", r.stderr)
+	}
+	for _, want := range []string{"jump-land", "speed or loop"} {
+		if !strings.Contains(r.stderr, want) {
+			t.Errorf("warning should mention %q:\n%s", want, r.stderr)
+		}
+	}
+}
+
+// And a file igor wrote itself must never trip it.
+func TestUneditedFramesResourceIsNotWarnedAbout(t *testing.T) {
+	dir := layoutFixture(t)
+	mustRun(t, dir, "--cli")
+
+	writeBlocks(t, filepath.Join(dir, "in", "chars", "alice", "jump", "jump-02.png"),
+		16, 16, []block{{x: 2, y: 2, w: 11, h: 11}})
+	r := mustRun(t, dir, "--cli")
+
+	if strings.Contains(r.stderr, "looks hand edited") {
+		t.Errorf("igor's own output was reported as hand edited:\n%s", r.stderr)
+	}
+}
+
+// Duplicating a layer to tile it across a level, or grouping layers under a
+// node of your own, is natural in the editor and igor overwrites all of it.
+// This is what cost joojeh its Fishing Pier dock.
+func TestHandEditedEnvSceneIsWarnedAboutBeforeOverwrite(t *testing.T) {
+	dir := layoutFixture(t)
+	scene := filepath.Join(dir, "out", "env", "house", "house.tscn")
+	mustRun(t, dir, "--cli")
+
+	body := readFile(t, scene)
+	before := strings.Count(body, "[node ")
+
+	// A layer tiled along the level, exactly as the dock was built.
+	body += "\n[node name=\"layer_00_2\" type=\"Sprite2D\" parent=\".\"]\nposition = Vector2(2669, 20)\n" +
+		"\n[node name=\"layer_00_3\" type=\"Sprite2D\" parent=\".\"]\nposition = Vector2(4428, 20)\n"
+	if err := os.WriteFile(scene, []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Something has to make the folder dirty for the scene to be rewritten.
+	writeBlocks(t, filepath.Join(dir, "in", "env", "house", "layer_01.png"),
+		40, 40, []block{{x: 7, y: 7, w: 12, h: 12}})
+	r := mustRun(t, dir, "--cli")
+
+	if !strings.Contains(r.stderr, "edited by hand") {
+		t.Errorf("igor overwrote a hand-edited scene silently:\n%s", r.stderr)
+	}
+	if !strings.Contains(r.stderr, "2 nodes will be lost") {
+		t.Errorf("warning should say how much is lost:\n%s", r.stderr)
+	}
+	if now := strings.Count(readFile(t, scene), "[node "); now != before {
+		t.Errorf("scene has %d nodes after rebuild, want igor's %d", now, before)
+	}
+}
+
+// And igor's own scene must never trip it.
+func TestUneditedEnvSceneIsNotWarnedAbout(t *testing.T) {
+	dir := layoutFixture(t)
+	mustRun(t, dir, "--cli")
+
+	writeBlocks(t, filepath.Join(dir, "in", "env", "house", "layer_01.png"),
+		40, 40, []block{{x: 9, y: 9, w: 12, h: 12}})
+	r := mustRun(t, dir, "--cli")
+
+	if strings.Contains(r.stderr, "edited by hand") {
+		t.Errorf("igor's own output was reported as hand edited:\n%s", r.stderr)
+	}
+}
+
+// Godot serialises the loop flag as an integer and rewrites "true" to 1 the
+// next time it saves, so writing true means igor and the editor churn that
+// field against each other on every run.
+func TestLoopFlagMatchesWhatGodotWrites(t *testing.T) {
+	dir := layoutFixture(t)
+	frames := filepath.Join(dir, "out", "chars", "alice", "alice_frames.tres")
+	mustRun(t, dir, "--cli")
+
+	body := readFile(t, frames)
+	if strings.Contains(body, `"loop": true`) {
+		t.Errorf("igor wrote a boolean Godot will rewrite as 1:\n%s", body)
+	}
+	if !strings.Contains(body, `"loop": 1`) {
+		t.Errorf("expected Godot's integer form:\n%s", body)
+	}
+
+	// And a file Godot has normalised must not read as hand edited.
+	r := mustRun(t, dir, "--cli", "--all")
+	if strings.Contains(r.stderr, "looks hand edited") {
+		t.Errorf("igor's own loop flag was reported as a hand edit:\n%s", r.stderr)
+	}
+	if !strings.Contains(r.stdout, "0 files written") {
+		t.Errorf("a rebuild should still write nothing:\n%s", r.stdout)
+	}
+}
+
+// Turning looping off is a real edit and still has to be reported.
+func TestLoopTurnedOffIsStillReportedAsAHandEdit(t *testing.T) {
+	dir := layoutFixture(t)
+	frames := filepath.Join(dir, "out", "chars", "alice", "alice_frames.tres")
+	mustRun(t, dir, "--cli")
+
+	body := strings.Replace(readFile(t, frames), `"loop": 1`, `"loop": 0`, 1)
+	if err := os.WriteFile(frames, []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	writeBlocks(t, filepath.Join(dir, "in", "chars", "alice", "jump", "jump-02.png"),
+		16, 16, []block{{x: 2, y: 2, w: 10, h: 10}})
+	r := mustRun(t, dir, "--cli")
+
+	if !strings.Contains(r.stderr, "looks hand edited") {
+		t.Errorf("a disabled loop went unreported:\n%s", r.stderr)
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -26,12 +27,7 @@ func writeTres(wp workPack) {
 	}
 
 	identity := identityPolicyFor(wp, charName, trgFolder, names)
-	switch {
-	case identity.reassigning():
-		warnLate(fmt.Sprintf("%s: no build cache and the sprite names have changed, so uids here are being reassigned rather than guessed", wp.f.path))
-	case identity.trusting():
-		warnLate(fmt.Sprintf("%s: no build cache, so uids here are kept on the assumption that these names still mean the same frames. Commit %s to make that certain", wp.f.path, manifestFilename))
-	}
+	dropped := 0
 
 	for bi, bin := range wp.bins {
 		// Build the res:// path by stripping prj.Destination
@@ -50,7 +46,8 @@ func writeTres(wp workPack) {
 			// The file on disk is the truth about identity, but only where the
 			// name can be attributed to the same source that wrote it.
 			var old *godotFile
-			if identity.carries(sName, keyOf(img)) {
+			carried := identity.carries(sName, keyOf(img))
+			if carried {
 				old = readGodotFile(tresPath)
 			}
 
@@ -60,11 +57,25 @@ func writeTres(wp workPack) {
 			if old == nil {
 				sesh.markIdentityReset(prj.resPath(filepath.Join(wp.f.path, sName+".tres")))
 			}
+			if !carried {
+				dropped++
+			}
 
 			content := buildTres(resPath, sr, img, wp.f.config.typ != FolderTypeItem, old)
 			if _, err := writeIfChanged(tresPath, []byte(content)); err != nil {
 				prg.Send(toException(err, &img))
 			}
+		}
+	}
+
+	// Said after the fact, so the count is what really happened rather than
+	// what a predicate thought would.
+	if identity.blind() {
+		switch {
+		case dropped == 0:
+			warnLate(fmt.Sprintf("%s: no build cache, so uids here are kept on the assumption that these names still mean the same art. Commit %s to make that certain", wp.f.path, manifestFilename))
+		default:
+			warnLate(fmt.Sprintf("%s: no build cache and %s changed name, so their uids are being reassigned rather than guessed", wp.f.path, plural(dropped, "sprite")))
 		}
 	}
 
@@ -76,26 +87,29 @@ func writeTres(wp workPack) {
 // where the name is attributable, because a uid on the wrong art is worse than
 // no uid at all, and the file on disk cannot say which source wrote it.
 type identityPolicy struct {
-	// Names derived from position rather than from the source filename, which
-	// are the only ones that can come to mean a different image.
-	positional bool
+	// Set when this folder names sprites by alphabetical position, so an
+	// undivided file's name can come to mean a different image. A name taken
+	// from the source filename never can.
+	renameLayers bool
 
 	// What each name meant on the previous build. Nil when there is no record
 	// to compare against, which is the case on the first run after a format
 	// bump and on a clone with no build cache.
 	owners map[string]slotKey
 
-	// Standing in for that record: the names on disk are exactly the names
-	// about to be written, so none was added or removed.
+	// Standing in for that record, for renameLayers folders: the names on disk
+	// are exactly the names about to be written, so none was added or removed.
 	sameNames bool
 
-	// How many pieces each divided source image was cut into, last build and
-	// this one. A divided piece's name is its reading-order position, so these
-	// counts are the only thing that says whether a name still means the same
-	// blob; its slotKey carries that same positional name, which would make
-	// the owner comparison below compare a key to itself.
+	// How many pieces each divided source image was cut into: last build, this
+	// build, and -- when there is no record -- what is sitting in the output
+	// folder. A divided piece's name is its reading-order position, and its
+	// slotKey carries that same positional name, so comparing owners would
+	// compare a key to itself; the count is the only thing that can say
+	// whether a name still means the same blob.
 	priorPieces map[string]int
 	nowPieces   map[string]int
+	diskPieces  map[string]int
 
 	// Whether there was any previous output at all. A first build has no
 	// identity to carry and is assuming nothing.
@@ -104,22 +118,21 @@ type identityPolicy struct {
 
 func identityPolicyFor(wp workPack, charName, trgFolder string, names []string) identityPolicy {
 	p := identityPolicy{
-		positional: wp.f.config.renameLayers,
-		owners:     priorOwners(wp, charName),
+		renameLayers: wp.f.config.renameLayers,
+		owners:       priorOwners(wp, charName),
+		nowPieces:    map[string]int{},
+		priorPieces:  map[string]int{},
 	}
 
-	// A divided image's pieces are numbered in reading order, so they shift
-	// for the same reason renamed layers do.
-	p.nowPieces = map[string]int{}
+	divided := false
 	for _, img := range wp.files {
 		if img.outName == "" {
 			continue
 		}
-		p.positional = true
+		divided = true
 		p.nowPieces[img.filename]++
 	}
 
-	p.priorPieces = map[string]int{}
 	for _, fr := range priorManifest.Folders[wp.f.path].Files {
 		for _, piece := range fr.Pieces {
 			if piece.Name != "" {
@@ -128,31 +141,66 @@ func identityPolicyFor(wp workPack, charName, trgFolder string, names []string) 
 		}
 	}
 
-	if p.positional && p.owners == nil {
-		p.sameNames, p.rebuild = onDiskNamesMatch(trgFolder, names)
+	if p.owners == nil {
+		if p.renameLayers {
+			p.sameNames, p.rebuild = onDiskNamesMatch(trgFolder, names)
+		}
+		if divided {
+			p.diskPieces, p.rebuild = onDiskPieceCounts(trgFolder, p.rebuild)
+		}
 	}
 	return p
 }
 
+// How many pieces of each divided image are sitting in the output folder,
+// counted from the reading-order suffix igor writes. Stands in for the build
+// record when there is none, and unlike a whole-folder name comparison it is
+// not thrown off by a stale .tres belonging to some other image.
+func onDiskPieceCounts(trgFolder string, rebuild bool) (map[string]int, bool) {
+	entries, err := os.ReadDir(trgFolder)
+	if err != nil {
+		return nil, rebuild
+	}
+
+	counts := map[string]int{}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		m := pieceSuffixRe.FindStringSubmatch(e.Name())
+		if m == nil {
+			continue
+		}
+		// Back to the source filename the pieces were cut from.
+		counts[m[1]+".png"]++
+		rebuild = true
+	}
+	return counts, rebuild
+}
+
 func (p identityPolicy) carries(name string, key slotKey) bool {
-	// The name is the source's own, so it cannot come to mean another image.
-	// Re-adding a deleted file legitimately reclaims the identity of its path,
-	// which is how Godot treats it too.
-	if !p.positional {
+	// A divided image numbers its pieces in reading order, so inserting a blob
+	// slides every later piece onto the next name. The piece holding a name is
+	// the same piece only if the count has not moved. This is per source file:
+	// a stale .tres from some unrelated image says nothing about it.
+	if key.outName != "" {
+		if p.owners == nil {
+			was, known := p.diskPieces[key.file]
+			return known && was == p.nowPieces[key.file]
+		}
+		was, known := p.priorPieces[key.file]
+		return known && was == p.nowPieces[key.file]
+	}
+
+	// Otherwise the name is the source file's own, and cannot come to mean
+	// another image. Re-adding a deleted file legitimately reclaims the
+	// identity of its path, which is how Godot treats it too.
+	if !p.renameLayers {
 		return true
 	}
 
 	if p.owners == nil {
 		return p.sameNames
-	}
-
-	// Inserting a blob renumbers every later piece of the same image, so the
-	// piece that holds a name is only the same piece if the count has not
-	// moved. Comparing owners here would always agree: both sides are keyed
-	// by the positional name itself.
-	if key.outName != "" {
-		was, known := p.priorPieces[key.file]
-		return known && was == p.nowPieces[key.file]
 	}
 
 	// A name the previous build never wrote has no identity to inherit. The
@@ -162,19 +210,10 @@ func (p identityPolicy) carries(name string, key slotKey) bool {
 	return known && owner == key
 }
 
-// True when uids are being dropped wholesale for want of anything to attribute
-// them by, which is worth saying out loud.
-func (p identityPolicy) reassigning() bool {
-	return p.positional && p.owners == nil && !p.sameNames
-}
-
-// True when positional names are being taken at face value because there is no
-// build record to check them against. Sound unless a frame was removed and
-// another added in the same run, which leaves the set of names identical while
-// shifting what those in between mean -- the one case nothing on disk can
-// reveal, and the reason the README asks for the cache to be committed.
-func (p identityPolicy) trusting() bool {
-	return p.positional && p.owners == nil && p.sameNames && p.rebuild
+// Whether this folder is working without a build record, which is what both
+// of the warnings below are really about.
+func (p identityPolicy) blind() bool {
+	return p.owners == nil && p.rebuild
 }
 
 // Whether the .tres already in a folder are exactly the ones about to be
@@ -504,7 +543,10 @@ func writeSpriteFrames(charName string, parentPath string, mf manifest) {
 		}
 
 		b.WriteString("],\n")
-		b.WriteString("\"loop\": true,\n")
+		// Godot serialises this flag as an integer and rewrites "true" to 1 on
+		// its next save, so writing true means fighting the editor over this
+		// field on every single run.
+		b.WriteString("\"loop\": 1,\n")
 		b.WriteString(fmt.Sprintf("\"name\": &\"%s\",\n", animName))
 		b.WriteString("\"speed\": 5.0\n")
 		b.WriteString("}")
@@ -512,9 +554,110 @@ func writeSpriteFrames(charName string, parentPath string, mf manifest) {
 
 	b.WriteString("]\n")
 
+	owned := make([]string, 0, len(animations))
+	for _, a := range animations {
+		owned = append(owned, filepath.Base(a.path))
+	}
+	warnIfHandEdited(outPath, owned)
+
 	if _, err := writeIfChanged(outPath, []byte(b.String())); err != nil {
 		prg.Send(toException(err, nil))
 	}
+}
+
+// Scenes igor generates are overwritten whole, so a file that has grown nodes
+// since igor wrote it has been built on by hand. Duplicating a layer to tile
+// it across a level, or grouping layers under a node of your own, is a natural
+// thing to do in the editor and igor destroys all of it without this.
+func warnIfSceneHandEdited(outPath, content string) {
+	data, err := os.ReadFile(outPath)
+	if err != nil {
+		return
+	}
+
+	count := func(s string) int {
+		n := 0
+		for _, line := range strings.Split(s, "\n") {
+			if strings.HasPrefix(line, "[node ") {
+				n++
+			}
+		}
+		return n
+	}
+
+	was, now := count(string(data)), count(content)
+	if was <= now {
+		return
+	}
+
+	warnLate(fmt.Sprintf("%s holds %d nodes and igor is about to write %d, so it has been edited by hand and those %s will be lost. This file is generated; keep an edited copy somewhere igor does not write",
+		outPath, was, now, plural(was-now, "node")))
+}
+
+var (
+	animNameRe  = regexp.MustCompile(`"name": &"([^"]+)"`)
+	animSpeedRe = regexp.MustCompile(`"speed": ([0-9.]+)`)
+	animLoopRe  = regexp.MustCompile(`"loop": ([^,\n]+)`)
+)
+
+// This file is igor's to rewrite, but it is a SpriteFrames sitting in a Godot
+// project, so it is the obvious place to tune a speed or compose an animation
+// out of existing frames. Doing that is losing work on the next run, and
+// silently, which is worse than losing it. Warns rather than merging: a file
+// that is half generated and half hand-written has no honest owner.
+func warnIfHandEdited(outPath string, owned []string) {
+	data, err := os.ReadFile(outPath)
+	if err != nil {
+		return
+	}
+	body := string(data)
+
+	ours := map[string]bool{}
+	for _, name := range owned {
+		ours[name] = true
+	}
+
+	extra := []string{}
+	for _, m := range animNameRe.FindAllStringSubmatch(body, -1) {
+		if !ours[m[1]] {
+			extra = append(extra, m[1])
+		}
+	}
+
+	tuned := 0
+	for _, m := range animSpeedRe.FindAllStringSubmatch(body, -1) {
+		if m[1] != "5.0" {
+			tuned++
+		}
+	}
+	for _, m := range animLoopRe.FindAllStringSubmatch(body, -1) {
+		// 1 is what igor writes and what Godot normalises true to; anything
+		// else is someone having turned looping off.
+		if v := strings.TrimSpace(m[1]); v != "1" && v != "true" {
+			tuned++
+		}
+	}
+
+	if len(extra) == 0 && tuned == 0 {
+		return
+	}
+
+	what := []string{}
+	if len(extra) > 0 {
+		sort.Strings(extra)
+		shown := extra
+		if len(shown) > 4 {
+			shown = append(append([]string{}, extra[:4]...), "...")
+		}
+		what = append(what, fmt.Sprintf("%s not generated from a folder (%s)",
+			plural(len(extra), "animation"), strings.Join(shown, ", ")))
+	}
+	if tuned > 0 {
+		what = append(what, fmt.Sprintf("%s with a speed or loop igor does not write", plural(tuned, "setting")))
+	}
+
+	warnLate(fmt.Sprintf("%s looks hand edited (%s) and igor is about to overwrite it. This file is generated; keep an edited copy somewhere igor does not write",
+		outPath, strings.Join(what, ", ")))
 }
 
 // Whether a .tres looks like one igor wrote into this folder: an AtlasTexture

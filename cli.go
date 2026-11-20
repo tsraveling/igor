@@ -89,6 +89,16 @@ func warn(msg string) {
 	prg.Send(logMsg{"WARN: " + msg})
 }
 
+// For warnings raised after trimming, where the TUI's log box is no longer
+// rendered and a logMsg would simply be discarded. Held for the end of the
+// run instead. CLI mode still prints inline, so it does not replay these.
+func warnLate(msg string) {
+	sesh.addWarning(msg)
+	if sesh.CLI {
+		emitWarning(msg)
+	}
+}
+
 // Non-fatal warnings share stderr with exceptions, since neither belongs in a
 // piped build log's stdout.
 func emitWarning(msg string) {

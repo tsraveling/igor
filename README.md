@@ -19,6 +19,18 @@ slice-size: 1024
 rules:
 ```
 
+### Rule precedence
+
+More than one rule can match the same folder. The most specific one wins, so a rule naming a subfolder overrides one covering the tree above it:
+
+```
+rules:
+  "chars/**": { mode: character, renameLayers: true }
+  "chars/hero/props": { mode: item }
+```
+
+Specificity is decided by fewest wildcards first, then most path segments, then the longer pattern, with ties broken alphabetically so the result never depends on map ordering.
+
 ### Modes
 
 #### Simple
@@ -176,7 +188,27 @@ Exit codes: `0` on a clean run, `1` if any errors occurred, `130` on ctrl+c, `14
 
 ## Incremental builds
 
-Igor tracks a content hash of every source folder in `<destination>/.igor-cache.json` and rebuilds only what changed. Commit that file so the team shares build state.
+Igor tracks a content hash of every source folder in `<destination>/.igor-cache.json` and rebuilds only what changed.
+
+**Commit `.igor-cache.json`.** It is no longer just a speed cache. Alongside the hashes it stores where every sprite sits on its spritesheet, and igor honours those slots on the next run so that editing one image does not reflow the sheet around it. A clone with no cache has no layout to honour. Igor will recover what it can by reading the regions out of the `.tres` files already in the output tree, but a clone with neither will repack from scratch, which is exactly the churn incremental layout exists to avoid. The cache now shows up in art diffs, but only the entries for the folder you actually touched will move.
+
+Adding or changing an image produces diff only for that image and the things that directly reference it:
+
+- Editing one animation frame rewrites that frame's `.tres` and its spritesheet. The other frames, the other animations, and every sibling's region stay byte-identical.
+- Replacing one PNG in an environment package redraws that sprite's region on the sheet and leaves every sibling `.tres` alone.
+- A run over unchanged art writes nothing at all. Igor renders each file and compares it against what is already on disk, so a rebuilt folder that produces identical bytes never reaches `git status`.
+
+### The character frames resource is generated, not yours
+
+`{char}_frames.tres` is written from scratch on every run that touches the character, with one animation per folder, igor's default speed, and loop on. It is a SpriteFrames sitting in your project, so it is the obvious place to tune a speed or compose an animation out of frames that already exist -- and the next run will overwrite all of it.
+
+Keep the version you have tuned somewhere igor does not write, next to the scene that uses it, and copy across from the generated one when the frame lists change. Igor warns when the file it is about to overwrite looks hand edited: an animation whose name does not match a source folder, or a speed or loop it would not have written itself.
+
+Igor also keeps Godot's identity across rebuilds. It reads the `uid://` and the `ext_resource` ids out of the file it is about to overwrite and re-attaches them, so references from your scenes survive a rebuild. `--clean` and `--nuke` delete the output tree and lose those uids with it; Godot mints new ones on the next import.
+
+Incremental placement leaves holes behind over time. Igor never compacts a sheet on its own — a silent reflow is the thing all of this exists to prevent — but it will name folders where a fresh pack would do meaningfully better. `--repack` ignores the stored layout and repacks every folder; `--nuke` implies it, since it deletes the layout along with the output. `--clean` does not: the folders it leaves standing keep theirs.
+
+One case cannot hold the line. Under `renameLayers`, output is named by alphabetical position, so inserting a frame into the *middle* of an animation renames every later one. Those are new resources with new uids, and any scene pointing at the old names will break. Igor prints the full rename list when it happens rather than letting it pass quietly.
 
 ## Development
 

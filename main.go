@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"io/fs"
 	"math/rand"
 	"os"
 	"os/signal"
@@ -65,6 +66,17 @@ func promptWriter() *os.File {
 	return os.Stderr
 }
 
+// One reader for the whole run. bufio fills its buffer on the first read, so a
+// second reader built for a later prompt finds the piped answers already gone.
+var stdinReader *bufio.Reader
+
+func stdin() *bufio.Reader {
+	if stdinReader == nil {
+		stdinReader = bufio.NewReader(os.Stdin)
+	}
+	return stdinReader
+}
+
 // Prompts unless --force was passed. A piped answer is fine; what is not fine
 // is no answer at all, since the caller asked for the work to happen and
 // silently skipping it would report success for work that never ran.
@@ -74,8 +86,7 @@ func confirmOrFail(question string) (bool, int) {
 	}
 
 	fmt.Fprintf(promptWriter(), "%s [y/N] ", question)
-	reader := bufio.NewReader(os.Stdin)
-	input, err := reader.ReadString('\n')
+	input, err := stdin().ReadString('\n')
 	if err != nil && input == "" {
 		fmt.Fprintln(promptWriter())
 		return false, fatal("Error: nothing to read on stdin, so %q went unanswered. Re-run on a terminal or pass --force.", question)
@@ -99,7 +110,7 @@ func handleStale() (bool, int) {
 		return true, 0
 	}
 
-	note("These %d output path(s) no longer have sources:", len(stale))
+	note("These %d output path(s) no longer have sources. Deleting them loses the Godot uids they hold:", len(stale))
 	for _, s := range stale {
 		note("  %s", s.path)
 	}
@@ -135,6 +146,92 @@ func handleStale() (bool, int) {
 	return true, 0
 }
 
+// The TUI renders its log box only while trimming, so a warning raised during
+// writing would never be seen. CLI mode has already printed these inline.
+func reportWarnings() {
+	warnings := sesh.takeWarnings()
+	if sesh.CLI || len(warnings) == 0 {
+		return
+	}
+	for _, w := range warnings {
+		note("WARNING: %s", w)
+	}
+}
+
+// renameLayers names by alphabetical position, so inserting a frame renames
+// every later one and breaks any scene that referenced it by uid. Nothing can
+// prevent that without a breaking change to naming, so it is said loudly.
+func reportRenames() {
+	renames := sesh.takeRenames()
+	if len(renames) == 0 {
+		return
+	}
+
+	note("%d sprite(s) were renamed by position. Scenes referencing them by the old name will break:", len(renames))
+	for _, r := range renames {
+		note("  %s", r)
+	}
+}
+
+// .tres left behind by a deleted frame or a rename. Igor cannot see the scenes
+// that may still reference them, so they are removed only when asked.
+func handleOrphans() int {
+	orphans := sesh.takeOrphans()
+	if len(orphans) == 0 {
+		return 0
+	}
+
+	// Their sheets go with them, so say so rather than surprising anyone.
+	sheets := ""
+	if n := len(sesh.heldSheets()); n > 0 {
+		sheets = fmt.Sprintf(", along with %s left with nothing to draw", plural(n, "spritesheet"))
+	}
+
+	if !sesh.Clean {
+		note("%d orphaned .tres file(s) no longer have a sprite%s. Run with --clean to remove them.", len(orphans), sheets)
+		return 0
+	}
+
+	note("These %d .tres file(s) no longer have a sprite%s:", len(orphans), sheets)
+	for _, o := range orphans {
+		note("  %s", o)
+	}
+	ok, code := confirmOrFail("Delete them?")
+	if code != 0 {
+		return code
+	}
+	if !ok {
+		note("Cancelled.")
+		return 0
+	}
+
+	// The deletion is already confirmed, so one file that will not budge must
+	// not abandon the rest of it half done.
+	removed, failed := 0, 0
+	for _, o := range orphans {
+		if err := os.Remove(o); err != nil {
+			fmt.Fprintf(os.Stderr, "Error removing %s: %s\n", o, err.Error())
+			failed++
+			continue
+		}
+		removed++
+	}
+
+	// These were the only things still pointing at those sheets.
+	for _, sheet := range sesh.takeHeldSheets() {
+		if err := os.Remove(sheet); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			fmt.Fprintf(os.Stderr, "Error removing %s: %s\n", sheet, err.Error())
+			failed++
+		}
+	}
+
+	note("Removed %d of %d orphaned .tres file(s).", removed, len(orphans))
+	if failed > 0 {
+		return 1
+	}
+	return 0
+}
+
 // Fills in sesh from the command line. Returns the positional arguments, or a
 // nonzero exit code if the flags do not make sense together.
 func parseArgs(args []string) ([]string, int) {
@@ -149,6 +246,8 @@ func parseArgs(args []string) ([]string, int) {
 			sesh.Nuke = true
 		case "--clean":
 			sesh.Clean = true
+		case "--repack":
+			sesh.Repack = true
 		case "--force":
 			sesh.Force = true
 		case "--cli":
@@ -183,6 +282,13 @@ func parseArgs(args []string) ([]string, int) {
 		sesh.CLI = false
 	default:
 		sesh.CLI = !isatty.IsTerminal(os.Stdout.Fd()) && !isatty.IsCygwinTerminal(os.Stdout.Fd())
+	}
+
+	// --nuke deletes the output tree, so there is no layout left to honour.
+	// --clean only removes paths whose source is gone; every surviving folder
+	// keeps its layout, and reflowing those would be the churn this avoids.
+	if sesh.Nuke {
+		sesh.Repack = true
 	}
 
 	if sesh.Nuke && sesh.All {
@@ -276,6 +382,7 @@ func run() int {
 
 	// Handle --nuke: confirm, then remove the output folder
 	if sesh.Nuke {
+		note("Deleting the output tree loses the Godot uids stored in it. Godot will mint new ones on the next import, and scenes referencing those resources by uid will need re-saving.")
 		ok, code := confirmOrFail(fmt.Sprintf("This will delete everything in %s. Are you sure?", prj.Destination))
 		if code != 0 {
 			return code
@@ -339,6 +446,12 @@ func run() int {
 	if aborted {
 		fmt.Fprintln(os.Stderr, "Interrupted.")
 		return 130
+	}
+
+	reportWarnings()
+	reportRenames()
+	if code := handleOrphans(); code != 0 {
+		return code
 	}
 
 	if !sesh.CLI {

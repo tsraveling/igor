@@ -83,16 +83,33 @@ func filterDirty(all []folder) (kept []folder, images int, skipped int) {
 		runDigests[f.path] = folderDigest(f)
 	}
 
-	if sesh.All || sesh.Nuke {
+	priorManifest = loadManifest()
+
+	// A character animation whose source and output are both gone is pruned
+	// from the manifest, but nothing would otherwise rewrite the frames
+	// resource still referencing it: there is no work for it and no prune.
+	for p := range priorManifest.Folders {
+		if _, stillSource := runDigests[p]; stillSource {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(prj.Destination, p)); err == nil {
+			continue
+		}
+		if getFolderConfig(p).typ == FolderTypeCharacter {
+			sesh.FramesDirty = append(sesh.FramesDirty, filepath.Dir(p))
+		}
+	}
+
+	// --repack has nothing to do unless the folders reach the work queue, and
+	// a run that skipped everything would silently ignore the flag.
+	if sesh.All || sesh.Nuke || sesh.Repack {
 		return all, countImages(all), 0
 	}
 
-	mf := loadManifest()
 	globals := globalsDigest()
 
-	dirty := map[string]bool{}
 	for _, f := range all {
-		entry, known := mf.Folders[f.path]
+		entry, known := priorManifest.Folders[f.path]
 
 		// A manifest can outlive the output it describes.
 		outputMissing := false
@@ -100,43 +117,73 @@ func filterDirty(all []folder) (kept []folder, images int, skipped int) {
 			outputMissing = true
 		}
 
-		if !known || entry.Digest != runDigests[f.path] || mf.Globals != globals || outputMissing {
-			dirty[f.path] = true
-		}
-	}
-
-	expandCharSiblings(all, dirty)
-
-	for _, f := range all {
-		if dirty[f.path] {
+		if !known || entry.Digest != runDigests[f.path] || priorManifest.Globals != globals ||
+			outputMissing || outputsIncomplete(f.path, entry) {
 			kept = append(kept, f)
 		}
 	}
+
 	return kept, countImages(kept), len(all) - len(kept)
 }
 
-// Character animations share a {char}_frames.tres written from whichever packs
-// are in the work queue, so a rebuilt character folder has to drag its siblings
-// along or the others drop out of the resource.
-func expandCharSiblings(all []folder, dirty map[string]bool) {
-	parents := map[string]bool{}
+// The manifest is load-bearing for correctness now, not just for speed:
+// {char}_frames.tres is built from it, so a record pointing at a .tres that is
+// no longer on disk has to rebuild the folder rather than emit a dangling path.
+func outputsIncomplete(folderPath string, entry folderEntry) bool {
+	dir := filepath.Join(prj.Destination, folderPath)
+	cfg := getFolderConfig(folderPath)
 
-	for _, f := range all {
-		if dirty[f.path] && f.config.typ == FolderTypeCharacter {
-			parents[filepath.Dir(f.path)] = true
-		}
-	}
-	for _, pruned := range sesh.Pruned {
-		if getFolderConfig(pruned).typ == FolderTypeCharacter {
-			parents[filepath.Dir(pruned)] = true
+	// Each oversized image reassembles into a scene of its own.
+	for _, s := range entry.Slices {
+		if _, err := os.Stat(filepath.Join(dir, s.Dir, s.Dir+".tscn")); err != nil {
+			return true
 		}
 	}
 
-	for _, f := range all {
-		if f.config.typ == FolderTypeCharacter && parents[filepath.Dir(f.path)] {
-			dirty[f.path] = true
+	// An env package's layers are reassembled by a scene beside them.
+	if cfg.typ == FolderTypeEnv {
+		if _, err := os.Stat(filepath.Join(dir, filepath.Base(folderPath)+".tscn")); err != nil {
+			return true
 		}
 	}
+
+	if len(entry.Files) == 0 {
+		return false
+	}
+
+	for _, name := range manifestSpriteNames(folderPath, cfg, entry) {
+		if _, err := os.Stat(filepath.Join(dir, name+".tres")); err != nil {
+			return true
+		}
+	}
+
+	// A .tres is no use without the sheet it points at. Only the bins the
+	// layout actually places into are checked, since an emptied interior bin
+	// keeps its index but legitimately has no sheet.
+	used := map[int]bool{}
+	for _, fr := range entry.Files {
+		for _, p := range fr.Pieces {
+			used[p.Bin] = true
+		}
+	}
+	for bin := range used {
+		if _, err := os.Stat(filepath.Join(dir, binName(dir, bin))); err != nil {
+			return true
+		}
+	}
+
+	// A character's frames resource is written from these records too, and
+	// nothing else would notice it had gone: with no dirty folder there is no
+	// parent to rewrite it for.
+	if cfg.typ == FolderTypeCharacter {
+		parent := filepath.Dir(folderPath)
+		frames := filepath.Join(prj.Destination, parent, filepath.Base(parent)+"_frames.tres")
+		if _, err := os.Stat(frames); err != nil {
+			return true
+		}
+	}
+
+	return false
 }
 
 func countImages(folders []folder) int {
@@ -152,10 +199,14 @@ func countImages(folders []folder) int {
 // the whole run.
 func buildManifest(built []folder, work []workPiece, exceptions []exception) (manifest, bool) {
 	slices := map[string][]sliceEntry{}
+	packs := map[string]workPack{}
 	for _, w := range work {
-		if ws, ok := w.(workSlice); ok {
-			src := strings.TrimSuffix(ws.file.filename, filepath.Ext(ws.file.filename))
-			slices[ws.f.path] = append(slices[ws.f.path], sliceEntry{Dir: ws.file.baseName(), Src: src})
+		switch v := w.(type) {
+		case workSlice:
+			src := strings.TrimSuffix(v.file.filename, filepath.Ext(v.file.filename))
+			slices[v.f.path] = append(slices[v.f.path], sliceEntry{Dir: v.file.baseName(), Src: src})
+		case workPack:
+			packs[v.f.path] = v
 		}
 	}
 
@@ -175,15 +226,118 @@ func buildManifest(built []folder, work []workPiece, exceptions []exception) (ma
 		delete(mf.Folders, p)
 	}
 
+	// A folder whose source and output are both gone is visited by neither
+	// stale detection, which needs the output, nor dirty detection, which
+	// needs the source. Left alone it lingers forever and puts dangling paths
+	// into {char}_frames.tres.
+	for p := range mf.Folders {
+		if _, stillSource := runDigests[p]; stillSource {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(prj.Destination, p)); err == nil {
+			continue
+		}
+		delete(mf.Folders, p)
+	}
+
 	for _, f := range built {
 		if failed[f.path] {
-			delete(mf.Folders, f.path)
+			// Dropping the entry outright would also drop the record of what
+			// igor wrote here, so its superseded sheets and orphans could
+			// never be attributed again. Keeping it without a digest leaves
+			// the folder dirty, which is the part that matters.
+			was := mf.Folders[f.path]
+			mf.Folders[f.path] = folderEntry{Bins: was.Bins, Orphans: was.Orphans}
 			continue
 		}
 		entries := slices[f.path]
 		sort.Slice(entries, func(i, j int) bool { return entries[i].Dir < entries[j].Dir })
-		mf.Folders[f.path] = folderEntry{Digest: runDigests[f.path], Slices: entries}
+
+		entry := folderEntry{Digest: runDigests[f.path], Slices: entries}
+		if wp, ok := packs[f.path]; ok {
+			entry.Bins = len(wp.bins)
+			entry.Files = placementRecords(wp)
+		}
+		entry.Orphans = retiredSprites(f.path, entry)
+		mf.Folders[f.path] = entry
 	}
 
 	return mf, true
+}
+
+// Sprites this folder used to have and no longer writes, plus any from older
+// builds that are still sitting there. This is the whole basis on which
+// --clean decides a file is igor's to delete, so it is kept as a record rather
+// than inferred later from what a file happens to look like.
+func retiredSprites(folderPath string, entry folderEntry) []string {
+	cfg := getFolderConfig(folderPath)
+
+	current := map[string]bool{}
+	for _, n := range manifestSpriteNames(folderPath, cfg, entry) {
+		current[n] = true
+	}
+
+	was := priorManifest.Folders[folderPath]
+	candidates := append(manifestSpriteNames(folderPath, cfg, was), was.Orphans...)
+
+	dir := filepath.Join(prj.Destination, folderPath)
+	seen := map[string]bool{}
+	retired := []string{}
+	for _, n := range candidates {
+		if current[n] || seen[n] {
+			continue
+		}
+		// Only while it is actually there; once removed it stops being ours.
+		if _, err := os.Stat(filepath.Join(dir, n+".tres")); err != nil {
+			continue
+		}
+		seen[n] = true
+		retired = append(retired, n)
+	}
+
+	sort.Strings(retired)
+	return retired
+}
+
+// Where every piece of every packed source file landed, so the next run can
+// honour the same slots instead of reflowing the sheet around a single edit.
+func placementRecords(wp workPack) []fileRecord {
+	placed := make([]piecePlacement, len(wp.files))
+	found := make([]bool, len(wp.files))
+
+	for bi, bin := range wp.bins {
+		for _, sr := range bin.rects {
+			if sr.i < 0 || sr.i >= len(wp.files) {
+				continue
+			}
+			placed[sr.i] = piecePlacement{
+				Name: wp.files[sr.i].outName,
+				Bin:  bi,
+				X:    sr.x, Y: sr.y, W: sr.w, H: sr.h,
+			}
+			found[sr.i] = true
+		}
+	}
+
+	byFile := map[string]*fileRecord{}
+	names := []string{}
+	for i, f := range wp.files {
+		if !found[i] {
+			continue
+		}
+		rec, ok := byFile[f.filename]
+		if !ok {
+			rec = &fileRecord{File: f.filename}
+			byFile[f.filename] = rec
+			names = append(names, f.filename)
+		}
+		rec.Pieces = append(rec.Pieces, placed[i])
+	}
+
+	sort.Strings(names)
+	out := make([]fileRecord, 0, len(names))
+	for _, n := range names {
+		out = append(out, *byFile[n])
+	}
+	return out
 }

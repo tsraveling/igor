@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -23,8 +22,13 @@ func writeEnvTscn(folderPath string, packs []workPack, slices []workSlice) {
 
 	// Add packed sprites (small images → .tres referencing spritesheet)
 	for _, wp := range packs {
-		for _, img := range wp.files {
-			spriteName := img.baseName()
+		// The same naming writeTres used, or the scene references .tres paths
+		// that were never written.
+		sortedIndex := alphaIndexes(wp.files, wp.f.config.renameLayers)
+		charName := filepath.Base(filepath.Dir(wp.f.path))
+
+		for i, img := range wp.files {
+			spriteName := spriteName(wp.f.config, img, wp.f.name, charName, sortedIndex[i])
 			tresRelPath := filepath.Join(img.path, spriteName+".tres")
 			resPath := prj.resPath(tresRelPath)
 			layers = append(layers, envLayer{
@@ -61,19 +65,31 @@ func writeEnvTscn(folderPath string, packs []workPack, slices []workSlice) {
 		return layers[i].filename < layers[j].filename
 	})
 
+	outPath := filepath.Join(prj.Destination, folderPath, folderName+".tscn")
+	old := readGodotFile(outPath)
+
+	// Ids are kept per res:// path rather than by position, so inserting a
+	// layer no longer renumbers every id after it.
+	alloc := newIDAllocator(old)
+	ids := make([]string, len(layers))
+	for i, l := range layers {
+		ids[i] = alloc.sceneID(l.resPath)
+	}
+
 	var b strings.Builder
 
 	// Header
-	b.WriteString(fmt.Sprintf("[gd_scene load_steps=%d format=3]\n\n", len(layers)+1))
+	b.WriteString(carryHeader(old, "gd_scene", "",
+		fmt.Sprintf("[gd_scene load_steps=%d format=3]", len(layers)+1), len(layers)+1))
+	b.WriteString("\n\n")
 
 	// ext_resource entries
 	for i, l := range layers {
-		id := fmt.Sprintf("%d", i+1)
+		typ := "Texture2D"
 		if l.isScene {
-			b.WriteString(fmt.Sprintf("[ext_resource type=\"PackedScene\" path=\"%s\" id=\"%s\"]\n", l.resPath, id))
-		} else {
-			b.WriteString(fmt.Sprintf("[ext_resource type=\"Texture2D\" path=\"%s\" id=\"%s\"]\n", l.resPath, id))
+			typ = "PackedScene"
 		}
+		b.WriteString(extResourceLine(typ, l.resPath, ids[i], old))
 	}
 
 	// Root node
@@ -81,7 +97,7 @@ func writeEnvTscn(folderPath string, packs []workPack, slices []workSlice) {
 
 	// Child nodes, layered in alphabetical order
 	for i, l := range layers {
-		id := fmt.Sprintf("%d", i+1)
+		id := ids[i]
 		nodeName := l.filename
 
 		if l.isScene {
@@ -99,9 +115,9 @@ func writeEnvTscn(folderPath string, packs []workPack, slices []workSlice) {
 		}
 	}
 
-	// Write the file
-	outPath := filepath.Join(prj.Destination, folderPath, folderName+".tscn")
-	if err := os.WriteFile(outPath, []byte(b.String()), 0644); err != nil {
+	warnIfSceneHandEdited(outPath, b.String())
+
+	if _, err := writeIfChanged(outPath, []byte(b.String())); err != nil {
 		prg.Send(toException(err, nil))
 	}
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"image"
 	"image/draw"
@@ -68,10 +69,10 @@ func slice(w workSlice) {
 }
 
 func saveSlice(img image.Image, path string) error {
-	f, err := os.Create(path)
-	if err != nil {
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
 		return err
 	}
-	defer f.Close()
-	return png.Encode(f, img)
+	_, err := writeIfChanged(path, buf.Bytes())
+	return err
 }
